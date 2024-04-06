@@ -31,7 +31,9 @@ lazy_static! {
 #[typetag::serde]
 #[async_trait]
 impl AsyncRunnable for FetchReelJob {
+    #[tracing::instrument(skip(queue))]
     async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        tracing::info!("Fetching reel");
         let context = JOB_CONTEXT.get().unwrap();
         let captures = REEL_REGEX.captures(&self.reel_url).unwrap();
         let instagram_id = captures.get(1).unwrap().as_str();
@@ -45,14 +47,18 @@ impl AsyncRunnable for FetchReelJob {
             .unwrap();
 
         if existing.is_some() {
+            tracing::info!("Unprocessed recipe already exists skipping...");
             return Ok(());
         }
 
+        tracing::info!("Downloading reel");
         let yt_dlp_output = Command::new(&context.yt_dlp_command_string)
             .current_dir(&temp_dir.path())
             .args(&["--write-info-json", "-o", "reel.%(ext)s", &self.reel_url])
             .output()
             .await?;
+
+        tracing::info!("Reel downloaded, status_code = {:?}", yt_dlp_output.status);
 
         if !yt_dlp_output.status.success() {
             let description = format!("yt-dlp failed {}: {}", yt_dlp_output.status, String::from_utf8_lossy(&yt_dlp_output.stderr));
@@ -67,6 +73,7 @@ impl AsyncRunnable for FetchReelJob {
             &context.reel_dir.join(&info["id"].as_str().unwrap()).with_extension("mp4"),
         )?;
 
+        tracing::info!("Adding to unprocessed_recipes");
         sqlx::query("insert into unprocessed_recipes (instagram_id, instagram_url, info_json) values ($1, $2, $3)")
             .bind(instagram_id)
             .bind(&self.reel_url)
@@ -75,6 +82,7 @@ impl AsyncRunnable for FetchReelJob {
             .await
             .unwrap();
 
+        tracing::info!("Triggering next job");
         queue.insert_task(&LLmExtractDetailsJob {
             instagram_id: instagram_id.to_string(),
         }).await?;
