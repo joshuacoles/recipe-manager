@@ -32,7 +32,7 @@ impl AsyncRunnable for LLmExtractDetailsJob {
             .with_api_key("gemma")
         );
 
-        let (description,) = sqlx::query_as::<_, (String, )>("select info_json ->> 'description' from unprocessed_recipes where instagram_id = $1")
+        let (description, ) = sqlx::query_as::<_, (String, )>("select info_json ->> 'description' from unprocessed_recipes where instagram_id = $1")
             .bind(&self.instagram_id)
             .fetch_one(&context.db)
             .await.unwrap();
@@ -65,23 +65,28 @@ impl AsyncRunnable for LLmExtractDetailsJob {
         let message = message.replace("```json\n", "").replace("```", "");
 
         // TODO: Multiple recipes
-        let response = &serde_json::from_str::<Vec<Response>>(&message).unwrap()[0];
+        let recipes_in_description = &serde_json::from_str::<Vec<Response>>(&message).unwrap();
+        tracing::info!("Found {} recipes in description", recipes_in_description.len());
 
-        tracing::info!("Add completed recipe to database");
         let mut txn = context.db.begin().await.unwrap();
-        sqlx::query(r#"
+
+        for recipe in recipes_in_description {
+            tracing::info!("Add completed recipe to database", title=recipe.title);
+
+            sqlx::query(r#"
                 insert into recipes (instagram_id, title, raw_description, ingredients, instructions, info_json, instagram_url)
                 select instagram_id, $2, info_json ->> 'description', $3, $4, info_json, instagram_url
                 from unprocessed_recipes
                 where instagram_id = $1
             "#)
-            .bind(&self.instagram_id)
-            .bind(&response.title)
-            .bind(&response.ingredients)
-            .bind(&response.instructions)
-            .execute(&mut *txn)
-            .await
-            .unwrap();
+                .bind(&self.instagram_id)
+                .bind(&recipe.title)
+                .bind(&recipe.ingredients)
+                .bind(&recipe.instructions)
+                .execute(&mut *txn)
+                .await
+                .unwrap();
+        }
 
         sqlx::query("delete from unprocessed_recipes where instagram_id = $1")
             .bind(&self.instagram_id)
