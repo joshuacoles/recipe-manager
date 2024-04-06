@@ -1,6 +1,7 @@
 mod jobs;
 mod cli;
 
+use std::path::PathBuf;
 use clap::Parser;
 use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls};
 use jobs::fetch_reel::FetchReelJob;
@@ -13,10 +14,14 @@ use axum::routing::post;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::FromRow;
+use sqlx::{FromRow, PgPool};
 use tower_http::services::ServeFile;
 use cli::Cli;
 use crate::jobs::{JOB_CONTEXT, JobContext};
+
+use axum_template::{engine::Engine, RenderHtml};
+use minijinja::{path_loader, Environment};
+use minijinja_autoreload::AutoReloader;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -51,11 +56,28 @@ async fn main() -> Result<(), anyhow::Error> {
 
     JOB_CONTEXT.set(job_context.clone()).unwrap();
 
+    // Set up the `minijinja` engine with the same route paths as the Axum router
+    let jinja = AutoReloader::new(move |notifier| {
+        let template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("views");
+
+        let mut env = Environment::new();
+        env.set_loader(path_loader(&template_path));
+        notifier.set_fast_reload(true);
+        notifier.watch_path(&template_path, true);
+        Ok(env)
+    });
+
+    let template_engine = Engine::from(jinja);
+
     let app = Router::new()
         .route("/api/recipes/read/:id", get(get_recipe))
         .route("/api/recipes/from_reel", post(create_recipe_from_reel))
         .route("/videos/:instagram_id", get(get_video))
+        .route("/recipes/:id", get(view_recipe))
+        .layer(Extension(db.clone()))
         .layer(Extension(queue.clone()))
+        .layer(Extension(template_engine))
         .layer(Extension(job_context));
 
     let mut pool: AsyncWorkerPool<AsyncQueue<NoTls>> = AsyncWorkerPool::builder()
@@ -75,6 +97,19 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?;
 
     Ok(())
+}
+
+async fn view_recipe(
+    Extension(template_engine): Extension<Engine<AutoReloader>>,
+    Extension(db): Extension<PgPool>,
+    Path((recipe_id, )): Path<(u32, )>
+) -> impl IntoResponse {
+    let recipe: Recipe = sqlx::query_as("select * from recipes where id = $1")
+        .bind(recipe_id as i32)
+        .fetch_one(&db)
+        .await.unwrap();
+
+    RenderHtml("recipe.html", template_engine, recipe)
 }
 
 async fn shutdown_signal() {
