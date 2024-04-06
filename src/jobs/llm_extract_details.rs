@@ -5,13 +5,13 @@ use fang::async_trait;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
-pub(crate) struct FetchReelJob {
-    pub reel_url: String,
+pub(crate) struct LLmExtractDetailsJob {
+    pub instagram_id: String,
 }
 
 #[typetag::serde]
 #[async_trait]
-impl AsyncRunnable for FetchReelJob {
+impl AsyncRunnable for LLmExtractDetailsJob {
     async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         dbg!(self);
         Ok(())
@@ -19,13 +19,5 @@ impl AsyncRunnable for FetchReelJob {
 
     fn uniq(&self) -> bool {
         true
-    }
-
-    fn max_retries(&self) -> i32 {
-        3
-    }
-
-    fn backoff(&self, attempt: u32) -> u32 {
-        60 * u32::pow(2, attempt)
     }
 }
