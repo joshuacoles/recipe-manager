@@ -58,7 +58,7 @@ impl AsyncRunnable for LLmExtractDetailsJob {
         };
 
         let completion = client.chat().create(completion).await.unwrap();
-        tracing::info!("Response received: {:?}", completion);
+        tracing::info!("Response received: {:#?}", completion);
 
         let response = &completion.choices[0];
         let message = response.message.content.clone().unwrap();
