@@ -13,8 +13,7 @@ pub(crate) struct LLmExtractDetailsJob {
 #[async_trait]
 impl AsyncRunnable for LLmExtractDetailsJob {
     async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
-        dbg!(self);
-        Ok(())
+
     }
 
     fn uniq(&self) -> bool {

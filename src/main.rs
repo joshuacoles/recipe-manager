@@ -21,6 +21,10 @@ struct Cli {
     /// Path to youtube-dl if not on PATH
     #[clap(long = "yt-dlp-path", env = "RECIPE_YT_DLP_PATH")]
     yt_dlp_path: Option<PathBuf>,
+
+    /// Directory to save reels
+    #[clap(short = 'r', long = "reel-dir", env = "RECIPE_REEL_DIR", default_value = "./reels")]
+    reel_dir: PathBuf,
 }
 
 type FangQueue = AsyncQueue<NoTls>;
@@ -29,6 +33,12 @@ type FangQueue = AsyncQueue<NoTls>;
 async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
+
+    if !cli.reel_dir.exists() {
+        std::fs::create_dir(&cli.reel_dir)?;
+    } else if !cli.reel_dir.is_dir() {
+        anyhow::bail!("reel-dir must be a directory");
+    }
 
     let db = sqlx::PgPool::connect(&cli.database_url)
         .await?;
@@ -44,7 +54,7 @@ async fn main() -> Result<(), anyhow::Error> {
     queue.connect(NoTls)
         .await?;
 
-    let job_context = JobContext::new(db.clone(), &cli.yt_dlp_path);
+    let job_context = JobContext::new(db.clone(), &cli.yt_dlp_path, cli.reel_dir.clone());
     JOB_CONTEXT.set(job_context.clone()).unwrap();
 
     let app = Router::new()
