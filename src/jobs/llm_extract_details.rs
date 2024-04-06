@@ -1,4 +1,3 @@
-use async_openai::config::OpenAIConfig;
 use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent, CreateChatCompletionRequest};
 use fang::{AsyncRunnable, FangError};
 use fang::asynk::async_queue::AsyncQueueable;
@@ -26,11 +25,7 @@ impl AsyncRunnable for LLmExtractDetailsJob {
     async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         tracing::info!("Using LLM to extract details from recipe description");
         let context = JOB_CONTEXT.get().unwrap();
-
-        let client = async_openai::Client::with_config(OpenAIConfig::new()
-            .with_api_base("http://localhost:11434/v1")
-            .with_api_key("gemma")
-        );
+        let client = &context.openai_client;
 
         let (description, ) = sqlx::query_as::<_, (String, )>("select info_json ->> 'description' from unprocessed_recipes where instagram_id = $1")
             .bind(&self.instagram_id)
@@ -46,7 +41,7 @@ impl AsyncRunnable for LLmExtractDetailsJob {
         tracing::info!("Prompt prepared");
 
         let completion = CreateChatCompletionRequest {
-            model: "gemma".to_string(),
+            model: context.model.clone(),
             messages: vec![
                 ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
                     content: ChatCompletionRequestUserMessageContent::Text(prompt),
@@ -71,7 +66,7 @@ impl AsyncRunnable for LLmExtractDetailsJob {
         let mut txn = context.db.begin().await.unwrap();
 
         for recipe in recipes_in_description {
-            tracing::info!("Add completed recipe to database", title=recipe.title);
+            tracing::info!("Add completed recipe to database, title={}", recipe.title);
 
             sqlx::query(r#"
                 insert into recipes (instagram_id, title, raw_description, ingredients, instructions, info_json, instagram_url)

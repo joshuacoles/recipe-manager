@@ -25,6 +25,40 @@ struct Cli {
     /// Directory to save reels
     #[clap(short = 'r', long = "reel-dir", env = "RECIPE_REEL_DIR", default_value = "./reels")]
     reel_dir: PathBuf,
+
+    /// OpenAI API key
+    #[clap(long = "openai-api-key", env = "RECIPE_OPENAI_API_KEY", default_value="ollama")]
+    openai_api_key: String,
+
+    /// OpenAI API model
+    #[clap(long = "model", env = "RECIPE_OPENAI_MODEL", default_value = "gemma")]
+    openai_model: String,
+
+    /// OpenAI Base url
+    #[clap(long = "openai-base-url", env = "RECIPE_OPENAI_BASE_URL", default_value = "http://localhost:11434/v1")]
+    openai_base_url: String,
+}
+
+impl Cli {
+    fn validate_reel_dir(&self) -> anyhow::Result<()> {
+        if !self.reel_dir.exists() {
+            std::fs::create_dir(&self.reel_dir)?;
+        } else if !self.reel_dir.is_dir() {
+            anyhow::bail!("reel-dir must be a directory");
+        }
+
+        Ok(())
+    }
+
+    fn openai_client(&self) -> anyhow::Result<async_openai::Client<async_openai::config::OpenAIConfig>> {
+        let config = async_openai::config::OpenAIConfig::new()
+            .with_api_base(&self.openai_base_url)
+            .with_api_key(&self.openai_api_key);
+
+        let client = async_openai::Client::with_config(config);
+
+        Ok(client)
+    }
 }
 
 type FangQueue = AsyncQueue<NoTls>;
@@ -33,17 +67,13 @@ type FangQueue = AsyncQueue<NoTls>;
 async fn main() -> Result<(), anyhow::Error> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
-
-    if !cli.reel_dir.exists() {
-        std::fs::create_dir(&cli.reel_dir)?;
-    } else if !cli.reel_dir.is_dir() {
-        anyhow::bail!("reel-dir must be a directory");
-    }
+    cli.validate_reel_dir()?;
 
     let db = sqlx::PgPool::connect(&cli.database_url)
         .await?;
 
-    sqlx::migrate!().run(&db)
+    sqlx::migrate!()
+        .run(&db)
         .await?;
 
     let mut queue = AsyncQueue::builder()
@@ -54,7 +84,13 @@ async fn main() -> Result<(), anyhow::Error> {
     queue.connect(NoTls)
         .await?;
 
-    let job_context = JobContext::new(db.clone(), &cli.yt_dlp_path, cli.reel_dir.clone());
+    let job_context = JobContext::new(
+        db.clone(),
+        &cli.yt_dlp_path,
+        cli.reel_dir.clone(),
+        cli.openai_client()?,
+        cli.openai_model
+    );
     JOB_CONTEXT.set(job_context.clone()).unwrap();
 
     let app = Router::new()
