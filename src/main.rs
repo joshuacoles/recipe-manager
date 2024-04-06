@@ -1,65 +1,22 @@
 mod jobs;
+mod cli;
 
-use std::net::SocketAddr;
-use std::path::PathBuf;
 use clap::Parser;
 use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls};
 use jobs::fetch_reel::FetchReelJob;
-use axum::{routing::{get}, Router, Extension};
-use crate::jobs::{JobContext, JOB_CONTEXT};
-
-#[derive(Debug, clap::Parser)]
-struct Cli {
-    /// Postgres connection url
-    #[clap(short = 'd', long = "db", env = "RECIPE_DATABASE_URL", default_value = "postgres://postgres@localhost/recipes")]
-    database_url: String,
-
-    /// Server address
-    #[clap(short = 'a', long = "address", env = "RECIPE_ADDRESS", default_value = "0.0.0.0:5005")]
-    address: SocketAddr,
-
-    /// Path to youtube-dl if not on PATH
-    #[clap(long = "yt-dlp-path", env = "RECIPE_YT_DLP_PATH")]
-    yt_dlp_path: Option<PathBuf>,
-
-    /// Directory to save reels
-    #[clap(short = 'r', long = "reel-dir", env = "RECIPE_REEL_DIR", default_value = "./reels")]
-    reel_dir: PathBuf,
-
-    /// OpenAI API key
-    #[clap(long = "openai-api-key", env = "RECIPE_OPENAI_API_KEY", default_value="ollama")]
-    openai_api_key: String,
-
-    /// OpenAI API model
-    #[clap(long = "model", env = "RECIPE_OPENAI_MODEL", default_value = "gemma")]
-    openai_model: String,
-
-    /// OpenAI Base url
-    #[clap(long = "openai-base-url", env = "RECIPE_OPENAI_BASE_URL", default_value = "http://localhost:11434/v1")]
-    openai_base_url: String,
-}
-
-impl Cli {
-    fn validate_reel_dir(&self) -> anyhow::Result<()> {
-        if !self.reel_dir.exists() {
-            std::fs::create_dir(&self.reel_dir)?;
-        } else if !self.reel_dir.is_dir() {
-            anyhow::bail!("reel-dir must be a directory");
-        }
-
-        Ok(())
-    }
-
-    fn openai_client(&self) -> anyhow::Result<async_openai::Client<async_openai::config::OpenAIConfig>> {
-        let config = async_openai::config::OpenAIConfig::new()
-            .with_api_base(&self.openai_base_url)
-            .with_api_key(&self.openai_api_key);
-
-        let client = async_openai::Client::with_config(config);
-
-        Ok(client)
-    }
-}
+use axum::{Extension, Json, Router, routing::get};
+use axum::body::Body;
+use axum::extract::Path;
+use axum::http::{HeaderMap, Request};
+use axum::response::IntoResponse;
+use axum::routing::post;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::FromRow;
+use tower_http::services::ServeFile;
+use cli::Cli;
+use crate::jobs::{JOB_CONTEXT, JobContext};
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -89,12 +46,15 @@ async fn main() -> Result<(), anyhow::Error> {
         &cli.yt_dlp_path,
         cli.reel_dir.clone(),
         cli.openai_client()?,
-        cli.openai_model
+        cli.openai_model,
     );
+
     JOB_CONTEXT.set(job_context.clone()).unwrap();
 
     let app = Router::new()
-        .route("/", get(root))
+        .route("/api/recipes/read/:id", get(get_recipe))
+        .route("/api/recipes/from_reel", post(create_recipe_from_reel))
+        .route("/videos/:instagram_id", get(get_video))
         .layer(Extension(queue.clone()))
         .layer(Extension(job_context));
 
@@ -111,19 +71,54 @@ async fn main() -> Result<(), anyhow::Error> {
     tracing::info!("Listening on {}", cli.address);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.unwrap();
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
 
     Ok(())
 }
 
-// basic handler that responds with a static string
-async fn root(Extension(mut queue): Extension<FangQueue>) -> &'static str {
-    queue.insert_task(&FetchReelJob::new(
-        "https://www.instagram.com/reel/C4Y3U7-vKxF/?igsh=MTk4ZnRpdDlxa21qag==".to_string()
-    )).await.unwrap();
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.unwrap();
+}
 
-    "Hello, World!"
+#[derive(Deserialize, Debug)]
+struct CreateRecipeFromReelRequest {
+    reel_url: String,
+}
+
+#[derive(Serialize, Deserialize, FromRow, Debug)]
+struct Recipe {
+    id: i32,
+    instagram_id: String,
+    title: String,
+    raw_description: String,
+    ingredients: Vec<String>,
+    instructions: Vec<String>,
+    info_json: Value,
+    instagram_url: String,
+    updated_at: Option<DateTime<Utc>>,
+}
+
+async fn get_recipe(Extension(context): Extension<JobContext>, Path((recipe_id, )): Path<(u32, )>) -> impl IntoResponse {
+    let recipe: Recipe = sqlx::query_as("select * from recipes where id = $1")
+        .bind(recipe_id as i32)
+        .fetch_one(&context.db)
+        .await
+        .unwrap();
+
+    Json(recipe)
+}
+
+async fn create_recipe_from_reel(Extension(mut queue): Extension<FangQueue>, Json(request): Json<CreateRecipeFromReelRequest>) -> &'static str {
+    queue.insert_task(&FetchReelJob::new(request.reel_url)).await.unwrap();
+
+    "Recipe creation task queued"
+}
+
+async fn get_video(Extension(context): Extension<JobContext>, headers: HeaderMap, Path((instagram_id, )): Path<(String, )>) -> impl IntoResponse {
+    let video_path = context.video_path(&instagram_id);
+
+    let mut req = Request::new(Body::empty());
+    *req.headers_mut() = headers;
+    ServeFile::new(video_path).try_call(req).await.unwrap()
 }

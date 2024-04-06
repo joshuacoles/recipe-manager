@@ -28,6 +28,10 @@ impl JobContext {
             model
         }
     }
+
+    pub fn video_path(&self, video_id: &str) -> PathBuf {
+        self.reel_dir.join(format!("{}.mp4", video_id))
+    }
 }
 
 pub(crate) static JOB_CONTEXT: OnceCell<JobContext> = OnceCell::new();
