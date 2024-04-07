@@ -1,4 +1,5 @@
 use std::fs::File;
+use anyhow::anyhow;
 use tokio::process::Command;
 use fang::{AsyncRunnable, FangError};
 use fang::asynk::async_queue::AsyncQueueable;
@@ -14,13 +15,18 @@ use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
 #[serde(crate = "fang::serde")]
 pub(crate) struct FetchReelJob {
     pub(crate) reel_url: String,
+    pub(crate) reel_id: String,
 }
 
 impl FetchReelJob {
-    pub fn new(reel_url: String) -> Self {
-        Self {
+    pub fn new(reel_url: String) -> anyhow::Result<Self> {
+        let captures = REEL_REGEX.captures(&reel_url).ok_or(anyhow!("Invalid URL"))?;
+        let reel_id = captures.get(1).ok_or(anyhow!("Invalid URL"))?.as_str().to_string();
+
+        Ok(Self {
             reel_url,
-        }
+            reel_id,
+        })
     }
 }
 

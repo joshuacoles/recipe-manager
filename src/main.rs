@@ -5,15 +5,15 @@ use std::path::PathBuf;
 use clap::Parser;
 use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls};
 use jobs::fetch_reel::FetchReelJob;
-use axum::{Extension, Json, Router, routing::get};
+use axum::{Extension, Form, Json, Router, routing::get};
 use axum::body::Body;
 use axum::extract::Path;
-use axum::http::{HeaderMap, Request};
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sqlx::{FromRow, PgPool};
 use tower_http::services::{ServeDir, ServeFile};
 use cli::Cli;
@@ -74,6 +74,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .route("/api/recipes/read/:id", get(get_recipe))
         .route("/api/recipes/from_reel", post(create_recipe_from_reel))
         .route("/videos/:instagram_id", get(get_video))
+        .route("/recipes", get(view_recipe_list))
+        .route("/recipes/new", post(create_recipe_from_reel_form))
         .route("/recipes/:id", get(view_recipe))
         .nest_service("/public", ServeDir::new("./public"))
         .layer(Extension(db.clone()))
@@ -103,7 +105,7 @@ async fn main() -> Result<(), anyhow::Error> {
 async fn view_recipe(
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<PgPool>,
-    Path((recipe_id, )): Path<(u32, )>
+    Path((recipe_id, )): Path<(u32, )>,
 ) -> impl IntoResponse {
     let recipe: Recipe = sqlx::query_as("select * from recipes where id = $1")
         .bind(recipe_id as i32)
@@ -111,6 +113,17 @@ async fn view_recipe(
         .await.unwrap();
 
     RenderHtml("recipe.html", template_engine, recipe)
+}
+
+async fn view_recipe_list(
+    Extension(template_engine): Extension<Engine<AutoReloader>>,
+    Extension(db): Extension<PgPool>,
+) -> impl IntoResponse {
+    let recipes: Vec<Recipe> = sqlx::query_as("select * from recipes")
+        .fetch_all(&db)
+        .await.unwrap();
+
+    RenderHtml("index.html", template_engine, json!({ "recipes": recipes }))
 }
 
 async fn shutdown_signal() {
@@ -145,10 +158,26 @@ async fn get_recipe(Extension(context): Extension<JobContext>, Path((recipe_id, 
     Json(recipe)
 }
 
-async fn create_recipe_from_reel(Extension(mut queue): Extension<FangQueue>, Json(request): Json<CreateRecipeFromReelRequest>) -> &'static str {
-    queue.insert_task(&FetchReelJob::new(request.reel_url)).await.unwrap();
+async fn create_recipe_from_reel_form(Extension(mut queue): Extension<FangQueue>, Form(request): Form<CreateRecipeFromReelRequest>) -> impl IntoResponse {
+    return match FetchReelJob::new(request.reel_url) {
+        Ok(job) => {
+            queue.insert_task(&job).await.unwrap();
+            (StatusCode::OK, "Recipe creation task queued")
+        }
 
-    "Recipe creation task queued"
+        Err(_) => (StatusCode::BAD_REQUEST, "Invalid reel URL"),
+    };
+}
+
+async fn create_recipe_from_reel(Extension(mut queue): Extension<FangQueue>, Json(request): Json<CreateRecipeFromReelRequest>) -> impl IntoResponse {
+    return match FetchReelJob::new(request.reel_url) {
+        Ok(job) => {
+            queue.insert_task(&job).await.unwrap();
+            (StatusCode::OK, "Recipe creation task queued")
+        }
+
+        Err(_) => (StatusCode::BAD_REQUEST, "Invalid reel URL"),
+    };
 }
 
 async fn get_video(Extension(context): Extension<JobContext>, headers: HeaderMap, Path((instagram_id, )): Path<(String, )>) -> impl IntoResponse {
