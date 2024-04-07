@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
-use tower_http::services::ServeFile;
+use tower_http::services::{ServeDir, ServeFile};
 use cli::Cli;
 use crate::jobs::{JOB_CONTEXT, JobContext};
 
@@ -59,7 +59,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Set up the `minijinja` engine with the same route paths as the Axum router
     let jinja = AutoReloader::new(move |notifier| {
         let template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("views");
+            .join("./app/views");
 
         let mut env = Environment::new();
         env.set_loader(path_loader(&template_path));
@@ -75,6 +75,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .route("/api/recipes/from_reel", post(create_recipe_from_reel))
         .route("/videos/:instagram_id", get(get_video))
         .route("/recipes/:id", get(view_recipe))
+        .nest_service("/public", ServeDir::new("./public"))
         .layer(Extension(db.clone()))
         .layer(Extension(queue.clone()))
         .layer(Extension(template_engine))

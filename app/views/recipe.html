@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recipe Viewer</title>
+    <link rel="stylesheet" href="/public/stylesheets/application.css">
+</head>
+
+<body class="bg-gray-100">
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-4xl font-bold mb-4 text-center">Recipe Viewer</h1>
+    <div class="bg-white shadow-md rounded-lg p-6">
+        <h2 class="text-2xl font-bold mb-4" id="recipe-title">{{title}}</h2>
+
+        <div class="grid sm:grid-cols-2 gap-6">
+            <div>
+                <div>
+                    <div class="mb-6">
+                        <h3 class="text-xl font-bold mb-2">Ingredients</h3>
+                        <ul class="list-disc pl-6" id="recipe-ingredients">
+                            {% for ingredient in ingredients %}
+                            <li>{{ ingredient }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    <div class="mb-6">
+                        <h3 class="text-xl font-bold mb-2">Instructions</h3>
+                        <ol class="list-decimal pl-6" id="recipe-instructions">
+                            {% for instruction in instructions %}
+                            <li>{{ instruction }}</li>
+                            {% endfor %}
+                        </ol>
+                    </div>
+                </div>
+                <div class="flex justify-between mb-6">
+                    <a href="{{ instagram_url }}" class="text-blue-500 hover:underline" id="recipe-url" target="_blank">View on
+                        Instagram</a>
+                </div>
+
+                <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
+                    <summary class="text-blue-500 cursor-pointer">Raw Description</summary>
+                    <pre class="p-4 w-full text-wrap font-sans">{{ raw_description | replace("\u00A0", " ") }}</pre>
+                </details>
+            </div>
+            <div>
+                <video controls>
+                    <source src="/videos/{{instagram_id}}" type="video/mp4">
+                    Your browser does not support the video tag.
+                </video>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
