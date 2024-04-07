@@ -2,15 +2,19 @@ mod jobs;
 mod cli;
 
 use std::path::PathBuf;
+use async_trait::async_trait;
 use clap::Parser;
 use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls};
 use jobs::fetch_reel::FetchReelJob;
 use axum::{Extension, Form, Json, Router, routing::get};
 use axum::body::Body;
-use axum::extract::Path;
-use axum::http::{HeaderMap, Request, StatusCode};
-use axum::response::IntoResponse;
+use axum::extract::{FromRequest, Path, Request};
+use axum::extract::rejection::{FormRejection, JsonRejection};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::header::{ACCEPT, CONTENT_TYPE};
+use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use axum_extra::routing::Resource;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -22,6 +26,7 @@ use crate::jobs::{JOB_CONTEXT, JobContext};
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
+use serde::de::DeserializeOwned;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -70,13 +75,17 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let template_engine = Engine::from(jinja);
 
+    let recipes = Resource::named("recipes")
+        // Define a route for `GET /recipes`
+        .index(recipes_index)
+        // `POST /recipes`
+        .create(create_recipe_from_reel)
+        // `GET /recipes/:id`
+        .show(show_recipe);
+
     let app = Router::new()
-        .route("/api/recipes/read/:id", get(get_recipe))
-        .route("/api/recipes/from_reel", post(create_recipe_from_reel))
         .route("/videos/:instagram_id", get(get_video))
-        .route("/recipes", get(view_recipe_list))
-        .route("/recipes/new", post(create_recipe_from_reel_form))
-        .route("/recipes/:id", get(view_recipe))
+        .merge(recipes)
         .nest_service("/public", ServeDir::new("./public"))
         .layer(Extension(db.clone()))
         .layer(Extension(queue.clone()))
@@ -102,7 +111,24 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn view_recipe(
+async fn recipes_index(
+    header_map: HeaderMap,
+    Extension(template_engine): Extension<Engine<AutoReloader>>,
+    Extension(db): Extension<PgPool>,
+) -> impl IntoResponse {
+    let recipes: Vec<Recipe> = sqlx::query_as("select * from recipes")
+        .fetch_all(&db)
+        .await.unwrap();
+
+    match header_map.get(ACCEPT) {
+        Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
+            Json(recipes).into_response(),
+        _ => RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response()
+    }
+}
+
+async fn show_recipe(
+    header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<PgPool>,
     Path((recipe_id, )): Path<(u32, )>,
@@ -112,18 +138,11 @@ async fn view_recipe(
         .fetch_one(&db)
         .await.unwrap();
 
-    RenderHtml("recipe.html", template_engine, recipe)
-}
-
-async fn view_recipe_list(
-    Extension(template_engine): Extension<Engine<AutoReloader>>,
-    Extension(db): Extension<PgPool>,
-) -> impl IntoResponse {
-    let recipes: Vec<Recipe> = sqlx::query_as("select * from recipes")
-        .fetch_all(&db)
-        .await.unwrap();
-
-    RenderHtml("index.html", template_engine, json!({ "recipes": recipes }))
+    match header_map.get(ACCEPT) {
+        Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
+            Json(recipe).into_response(),
+        _ => RenderHtml("recipe.html", template_engine, recipe).into_response()
+    }
 }
 
 async fn shutdown_signal() {
@@ -148,28 +167,49 @@ struct Recipe {
     updated_at: Option<DateTime<Utc>>,
 }
 
-async fn get_recipe(Extension(context): Extension<JobContext>, Path((recipe_id, )): Path<(u32, )>) -> impl IntoResponse {
-    let recipe: Recipe = sqlx::query_as("select * from recipes where id = $1")
-        .bind(recipe_id as i32)
-        .fetch_one(&context.db)
-        .await
-        .unwrap();
-
-    Json(recipe)
+enum FormOrJson<T> {
+    Form(T),
+    Json(T),
 }
 
-async fn create_recipe_from_reel_form(Extension(mut queue): Extension<FangQueue>, Form(request): Form<CreateRecipeFromReelRequest>) -> impl IntoResponse {
-    return match FetchReelJob::new(request.reel_url) {
-        Ok(job) => {
-            queue.insert_task(&job).await.unwrap();
-            (StatusCode::OK, "Recipe creation task queued")
+impl<T> FormOrJson<T> {
+    fn into_inner(self) -> T {
+        match self {
+            FormOrJson::Form(t) => t,
+            FormOrJson::Json(t) => t,
         }
-
-        Err(_) => (StatusCode::BAD_REQUEST, "Invalid reel URL"),
-    };
+    }
 }
 
-async fn create_recipe_from_reel(Extension(mut queue): Extension<FangQueue>, Json(request): Json<CreateRecipeFromReelRequest>) -> impl IntoResponse {
+#[async_trait]
+impl<T, S> FromRequest<S> for FormOrJson<T>
+    where
+        T: DeserializeOwned,
+        S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        if req.headers().get(CONTENT_TYPE) == Some(&HeaderValue::from_static("application/json")) {
+            Json::<T>::from_request(req, state)
+                .await
+                .map(|json| FormOrJson::Json(json.0))
+                .map_err(JsonRejection::into_response)
+        } else {
+            Form::<T>::from_request(req, state)
+                .await
+                .map(|form| FormOrJson::Form(form.0))
+                .map_err(FormRejection::into_response)
+        }
+    }
+}
+
+async fn create_recipe_from_reel(
+    Extension(mut queue): Extension<FangQueue>,
+    request: FormOrJson<CreateRecipeFromReelRequest>,
+) -> impl IntoResponse {
+    let request = request.into_inner();
+
     return match FetchReelJob::new(request.reel_url) {
         Ok(job) => {
             queue.insert_task(&job).await.unwrap();
