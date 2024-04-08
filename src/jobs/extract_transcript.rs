@@ -53,7 +53,7 @@ impl ExtractTranscript {
         sqlx::query("insert into transcripts (reel_id, transcript) values ($1, $2)")
             .bind(&self.reel_id)
             .bind(&transcript)
-            .execute(&context.db)
+            .execute(&context.raw_db)
             .await?;
 
         Ok(())

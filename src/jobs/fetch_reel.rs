@@ -39,7 +39,7 @@ impl FetchReelJob {
 
         let existing = sqlx::query("select 1 from recipes where instagram_id = $1 union select 1 from unprocessed_recipes where instagram_id = $1")
             .bind(&self.reel_id)
-            .fetch_optional(&context.db)
+            .fetch_optional(&context.raw_db)
             .await?;
 
         if existing.is_some() {
@@ -79,7 +79,7 @@ impl FetchReelJob {
             .bind(&self.reel_id)
             .bind(&self.reel_url)
             .bind(&info)
-            .execute(&context.db)
+            .execute(&context.raw_db)
             .await?;
 
         Ok(())

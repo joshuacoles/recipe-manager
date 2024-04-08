@@ -26,13 +26,13 @@ impl LLmExtractDetailsJob {
 
         let (description, ) = sqlx::query_as::<_, (String, )>("select info_json ->> 'description' from unprocessed_recipes where instagram_id = $1")
             .bind(&self.instagram_id)
-            .fetch_one(&context.db)
+            .fetch_one(&context.raw_db)
             .await?;
 
         let recipes_in_description = self.extract_recipes(context, description).await?;
         tracing::info!("Found {} recipes in description", recipes_in_description.len());
 
-        self.save_recipes(&context.db, &recipes_in_description).await?;
+        self.save_recipes(&context.raw_db, &recipes_in_description).await?;
         tracing::info!("Added completed recipe to database");
 
         Ok(())

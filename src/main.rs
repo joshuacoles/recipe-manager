@@ -1,5 +1,6 @@
 mod jobs;
 mod cli;
+mod entities;
 
 use std::path::PathBuf;
 use async_trait::async_trait;
@@ -26,6 +27,7 @@ use crate::jobs::{JOB_CONTEXT, JobContext};
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
+use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::de::DeserializeOwned;
 
 type FangQueue = AsyncQueue<NoTls>;
@@ -38,6 +40,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let db = sqlx::PgPool::connect(&cli.database_url)
         .await?;
+
+    let seaorm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.clone());
 
     sqlx::migrate!()
         .run(&db)
@@ -52,6 +56,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?;
 
     let job_context = JobContext::new(
+        seaorm.clone(),
         db.clone(),
         &cli.yt_dlp_path,
         cli.reel_dir.clone(),
@@ -87,6 +92,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .route("/videos/:instagram_id", get(get_video))
         .merge(recipes)
         .nest_service("/public", ServeDir::new("./public"))
+        .layer(Extension(seaorm.clone()))
         .layer(Extension(db.clone()))
         .layer(Extension(queue.clone()))
         .layer(Extension(template_engine))
@@ -114,11 +120,12 @@ async fn main() -> Result<(), anyhow::Error> {
 async fn recipes_index(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
-    Extension(db): Extension<PgPool>,
+    Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
-    let recipes: Vec<Recipe> = sqlx::query_as("select * from recipes")
-        .fetch_all(&db)
-        .await.unwrap();
+    let recipes = entities::recipes::Entity::find()
+        .all(&db)
+        .await
+        .unwrap();
 
     match header_map.get(ACCEPT) {
         Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
@@ -130,13 +137,14 @@ async fn recipes_index(
 async fn show_recipe(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
-    Extension(db): Extension<PgPool>,
+    Extension(db): Extension<DatabaseConnection>,
     Path((recipe_id, )): Path<(u32, )>,
 ) -> impl IntoResponse {
-    let recipe: Recipe = sqlx::query_as("select * from recipes where id = $1")
-        .bind(recipe_id as i32)
-        .fetch_one(&db)
-        .await.unwrap();
+    let recipe = entities::recipes::Entity::find_by_id(recipe_id as i32)
+        .one(&db)
+        .await
+        .unwrap()
+        .unwrap();
 
     match header_map.get(ACCEPT) {
         Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
@@ -152,24 +160,6 @@ async fn shutdown_signal() {
 #[derive(Deserialize, Debug)]
 struct CreateRecipeFromReelRequest {
     reel_url: String,
-}
-
-#[derive(Serialize, Deserialize, FromRow, Debug)]
-struct Recipe {
-    id: i32,
-    instagram_id: String,
-    title: String,
-    raw_description: String,
-    ingredients: Vec<String>,
-    instructions: Vec<String>,
-    info_json: Value,
-    instagram_url: String,
-    updated_at: Option<DateTime<Utc>>,
-
-    transcript_id: Option<i32>,
-
-    #[sqlx(default)]
-    segments: Vec<String>,
 }
 
 enum FormOrJson<T> {
