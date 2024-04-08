@@ -8,24 +8,25 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    #[sea_orm(column_type = "Text")]
-    pub instagram_id: String,
-    #[sea_orm(column_type = "Text")]
-    pub title: String,
-    #[sea_orm(column_type = "Text")]
-    pub raw_description: String,
-    pub ingredients: Vec<String>,
-    pub instructions: Vec<String>,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub info_json: Option<Json>,
     #[sea_orm(column_type = "Text", nullable)]
-    pub instagram_url: Option<String>,
+    pub title: Option<String>,
+    pub ingredients: Option<Vec<String>>,
+    pub instructions: Option<Vec<String>>,
     pub updated_at: DateTimeWithTimeZone,
     pub transcript_id: Option<i32>,
+    pub instagram_video_id: Option<i32>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::instagram_video::Entity",
+        from = "Column::InstagramVideoId",
+        to = "super::instagram_video::Column::Id",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    InstagramVideo,
     #[sea_orm(
         belongs_to = "super::transcript::Entity",
         from = "Column::TranscriptId",
@@ -34,6 +35,12 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     Transcript,
+}
+
+impl Related<super::instagram_video::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::InstagramVideo.def()
+    }
 }
 
 impl Related<super::transcript::Entity> for Entity {

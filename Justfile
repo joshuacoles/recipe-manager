@@ -9,3 +9,6 @@ generate-entities:
                                 --with-serde both \
                                 --ignore-tables _sqlx_migrations,fang_tasks \
                                 --output-dir ./src/entities
+
+migrate:
+    sqlx migrate run --database-url postgres://postgres@localhost/recipes
