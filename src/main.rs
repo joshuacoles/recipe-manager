@@ -16,10 +16,8 @@ use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum_extra::routing::Resource;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use sqlx::{FromRow, PgPool};
+use serde::{Deserialize};
+use serde_json::{json};
 use tower_http::services::{ServeDir, ServeFile};
 use cli::Cli;
 use crate::jobs::{JOB_CONTEXT, JobContext};
@@ -27,8 +25,9 @@ use crate::jobs::{JOB_CONTEXT, JobContext};
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect, SelectColumns};
 use serde::de::DeserializeOwned;
+use sqlx::PgPool;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -38,7 +37,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
     cli.validate_reel_dir()?;
 
-    let db = sqlx::PgPool::connect(&cli.database_url)
+    let db = PgPool::connect(&cli.database_url)
         .await?;
 
     let seaorm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.clone());
@@ -89,6 +88,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .show(show_recipe);
 
     let app = Router::new()
+        .route("/api/recipes/:id/transcribe", post(transcribe_recipe))
         .route("/videos/:instagram_id", get(get_video))
         .merge(recipes)
         .nest_service("/public", ServeDir::new("./public"))
@@ -115,6 +115,24 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?;
 
     Ok(())
+}
+
+async fn transcribe_recipe(
+    Path((id, )): Path<(u32, )>,
+    Extension(mut jobs): Extension<FangQueue>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> impl IntoResponse {
+    let (instagram_id, ) = entities::recipes::Entity::find_by_id(id as i32)
+        .select_only()
+        .select_column(entities::recipes::Column::InstagramId)
+        .into_tuple::<(String, )>()
+        .one(&db).await.unwrap().unwrap();
+
+    let job = jobs::extract_transcript::ExtractTranscript::new(instagram_id);
+
+    jobs.insert_task(&job).await.unwrap();
+
+    (StatusCode::OK, "Transcription task queued")
 }
 
 async fn recipes_index(
