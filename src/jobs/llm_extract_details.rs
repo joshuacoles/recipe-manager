@@ -4,13 +4,21 @@ use fang::{AsyncRunnable, FangError};
 use fang::asynk::async_queue::AsyncQueueable;
 use fang::serde::{Deserialize, Serialize};
 use fang::async_trait;
+use sea_orm::{EntityTrait, NotSet, Set};
 use sqlx::PgPool;
 use crate::jobs::{JOB_CONTEXT, JobContext};
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum ExtractionRequest {
+    Unprocessed(i32),
+    Existing(i32),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
 pub(crate) struct LLmExtractDetailsJob {
-    pub instagram_id: String,
+    pub request: ExtractionRequest,
+    pub with_transcript_if_present: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,18 +32,41 @@ impl LLmExtractDetailsJob {
     async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
         tracing::info!("Using LLM to extract details from recipe description");
 
-        let (description, ) = sqlx::query_as::<_, (String, )>("select info_json ->> 'description' from unprocessed_recipes where instagram_id = $1")
-            .bind(&self.instagram_id)
-            .fetch_one(&context.raw_db)
+        match self.request {
+            ExtractionRequest::Unprocessed(unprocessed_recipe_id) => self.extract_unprocessed_recipe(context, unprocessed_recipe_id).await?,
+            ExtractionRequest::Existing(recipe_id) => self.regenerate_existing_recipe(context, recipe_id).await?,
+        }
+
+        Ok(())
+    }
+
+    async fn regenerate_existing_recipe(&self, context: &JobContext, recipe_id: i32) -> anyhow::Result<()> {
+        unimplemented!("Regenerate existing recipe");
+
+        let (description, ) = sqlx::query_as::<_, (String, )>("select raw_description from recipes where id = $1")
+            .bind(recipe_id)
+            .fetch_one(&context.db)
             .await?;
 
         let recipes_in_description = self.extract_recipes(context, description).await?;
         tracing::info!("Found {} recipes in description", recipes_in_description.len());
 
-        self.save_recipes(&context.raw_db, &recipes_in_description).await?;
-        tracing::info!("Added completed recipe to database");
-
+        // self.save_recipes(&context.db, &recipes_in_description).await?;
+        // tracing::info!("Added completed recipe to database");
         Ok(())
+    }
+
+    async fn extract_unprocessed_recipe(&self, context: &JobContext, unprocessed_recipe_id: i32) -> anyhow::Result<()> {
+        let (instagram_id, description, ) = sqlx::query_as::<_, (String, String, )>("select instagram_id, info_json ->> 'description' from unprocessed_recipes where id = $1")
+            .bind(unprocessed_recipe_id)
+            .fetch_one(&context.db)
+            .await?;
+
+        let recipes_in_description = self.extract_recipes(context, description).await?;
+        tracing::info!("Found {} recipes in description", recipes_in_description.len());
+
+        self.save_newly_recipes(&context.raw_db, &recipes_in_description, instagram_id).await?;
+        tracing::info!("Added completed recipe to database");
     }
 
     async fn extract_recipes(&self, context: &JobContext, description: String) -> anyhow::Result<Vec<ExtractedRecipe>> {
@@ -73,7 +104,7 @@ impl LLmExtractDetailsJob {
         Ok(recipes_in_description)
     }
 
-    async fn save_recipes(&self, db: &PgPool, recipes_in_description: &[ExtractedRecipe]) -> anyhow::Result<()> {
+    async fn save_newly_recipes(&self, db: &PgPool, recipes_in_description: &[ExtractedRecipe], instagram_id: String) -> anyhow::Result<()> {
         let mut txn = db.begin().await?;
 
         for recipe in recipes_in_description {

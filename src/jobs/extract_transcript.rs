@@ -2,19 +2,20 @@ use std::path::Path;
 use async_openai::types::{AudioInput, AudioResponseFormat, CreateTranscriptionRequest, InputSource};
 use async_trait::async_trait;
 use fang::{AsyncQueueable, AsyncRunnable, Deserialize, FangError, Serialize};
-use sea_orm::{ActiveModelTrait, EntityTrait, NotSet, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, NotSet, Set};
 use crate::jobs::{JOB_CONTEXT, JobContext};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
 pub struct ExtractTranscript {
     pub(crate) reel_id: String,
+    pub(crate) regenerate_recipe_info: bool
 }
 
 
 impl ExtractTranscript {
     pub fn new(reel_id: String) -> Self {
-        Self { reel_id }
+        Self { reel_id, regenerate_recipe_info: false }
     }
 
     pub async fn extract_transcript(&self, video_path: &Path, context: &JobContext) -> anyhow::Result<String> {
@@ -58,13 +59,25 @@ impl ExtractTranscript {
 #[typetag::serde]
 #[async_trait]
 impl AsyncRunnable for ExtractTranscript {
-    #[tracing::instrument(skip(_queue))]
-    async fn run(&self, _queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+    #[tracing::instrument(skip(queue))]
+    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         let context = JOB_CONTEXT.get()
             .ok_or(FangError { description: "Failed to read context".to_string() })?;
 
         self.exec(context).await
             .map_err(|e| FangError { description: e.to_string() })?;
+
+        if self.regenerate_recipe_info {
+            let recipes = crate::entities::recipes::Entity::find()
+                .filter(crate::entities::recipes::Column::InstagramId.eq(&self.reel_id))
+                .all(&context.db).await?;
+
+            for recipe in recipes {
+                queue.insert_task(&crate::jobs::llm_extract_details::LLmExtractDetailsJob {
+                    instagram_id: self.reel_id.to_string()
+                }).await?;
+            }
+        }
 
         Ok(())
     }
