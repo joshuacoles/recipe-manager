@@ -7,6 +7,7 @@ use sqlx::{Pool, Postgres};
 
 pub mod fetch_reel;
 pub mod llm_extract_details;
+pub mod extract_transcript;
 
 #[derive(Debug, Clone)]
 pub struct JobContext {

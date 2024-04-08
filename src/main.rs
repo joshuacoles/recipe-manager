@@ -165,6 +165,11 @@ struct Recipe {
     info_json: Value,
     instagram_url: String,
     updated_at: Option<DateTime<Utc>>,
+
+    transcript_id: Option<i32>,
+
+    #[sqlx(default)]
+    segments: Vec<String>,
 }
 
 enum FormOrJson<T> {
