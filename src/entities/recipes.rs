@@ -13,8 +13,8 @@ pub struct Model {
     pub ingredients: Option<Vec<String>>,
     pub instructions: Option<Vec<String>>,
     pub updated_at: DateTimeWithTimeZone,
-    pub transcript_id: Option<i32>,
     pub instagram_video_id: Option<i32>,
+    pub generated_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -27,25 +27,11 @@ pub enum Relation {
         on_delete = "NoAction"
     )]
     InstagramVideo,
-    #[sea_orm(
-        belongs_to = "super::transcript::Entity",
-        from = "Column::TranscriptId",
-        to = "super::transcript::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Transcript,
 }
 
 impl Related<super::instagram_video::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::InstagramVideo.def()
-    }
-}
-
-impl Related<super::transcript::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Transcript.def()
     }
 }
 

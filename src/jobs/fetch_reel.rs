@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::fs::File;
 use anyhow::{anyhow, bail};
 use tokio::process::Command;
@@ -6,8 +7,11 @@ use fang::asynk::async_queue::AsyncQueueable;
 use fang::serde::{Deserialize, Serialize};
 use fang::async_trait;
 use lazy_static::lazy_static;
+use sea_orm::ActiveModelTrait;
+use sea_orm::ActiveValue::Set;
 use serde_json::Value;
 use tempfile::TempDir;
+use crate::entities::instagram_video;
 use crate::jobs::{JOB_CONTEXT, JobContext};
 use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
 
@@ -75,12 +79,13 @@ impl FetchReelJob {
 
         tracing::info!("Adding to unprocessed_recipes");
 
-        sqlx::query("insert into unprocessed_recipes (instagram_id, instagram_url, info_json) values ($1, $2, $3)")
-            .bind(&self.reel_id)
-            .bind(&self.reel_url)
-            .bind(&info)
-            .execute(&context.raw_db)
-            .await?;
+        instagram_video::ActiveModel {
+            instagram_id: Set(self.reel_id.clone()),
+            video_url: Set(self.reel_url.clone()),
+            info: Set(info),
+
+            ..Default::default()
+        }.insert(&context.db).await?;
 
         Ok(())
     }
@@ -89,19 +94,13 @@ impl FetchReelJob {
 #[typetag::serde]
 #[async_trait]
 impl AsyncRunnable for FetchReelJob {
-    #[tracing::instrument(skip(queue))]
-    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+    #[tracing::instrument(skip(_queue))]
+    async fn run(&self, _queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         let context = JOB_CONTEXT.get()
             .ok_or(FangError { description: "Failed to read context".to_string() })?;
 
         self.exec(context).await
             .map_err(|e| FangError { description: e.to_string() })?;
-
-        tracing::info!("Triggering next job");
-
-        queue.insert_task(&LLmExtractDetailsJob {
-            instagram_id: self.reel_id.to_string(),
-        }).await?;
 
         Ok(())
     }

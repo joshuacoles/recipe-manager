@@ -4,21 +4,18 @@ use fang::{AsyncRunnable, FangError};
 use fang::asynk::async_queue::AsyncQueueable;
 use fang::serde::{Deserialize, Serialize};
 use fang::async_trait;
-use sea_orm::{EntityTrait, NotSet, Set};
+use sea_orm::{DatabaseConnection, EntityTrait, NotSet, Related, Set};
 use sqlx::PgPool;
 use crate::jobs::{JOB_CONTEXT, JobContext};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum ExtractionRequest {
-    Unprocessed(i32),
-    Existing(i32),
-}
+use crate::entities::{instagram_video, recipes};
+use crate::entities::instagram_video::Model;
+use sea_orm::QueryFilter;
+use sea_orm::ColumnTrait;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
 pub(crate) struct LLmExtractDetailsJob {
-    pub request: ExtractionRequest,
-    pub with_transcript_if_present: bool,
+    pub video_id: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,57 +29,36 @@ impl LLmExtractDetailsJob {
     async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
         tracing::info!("Using LLM to extract details from recipe description");
 
-        match self.request {
-            ExtractionRequest::Unprocessed(unprocessed_recipe_id) => self.extract_unprocessed_recipe(context, unprocessed_recipe_id).await?,
-            ExtractionRequest::Existing(recipe_id) => self.regenerate_existing_recipe(context, recipe_id).await?,
-        }
+        let video: instagram_video::Model = instagram_video::Entity::find()
+            .filter(instagram_video::Column::Id.eq(self.video_id))
+            .one(&context.db)
+            .await?.ok_or(anyhow!("Video not found"))?;
 
-        Ok(())
-    }
-
-    async fn regenerate_existing_recipe(&self, context: &JobContext, recipe_id: i32) -> anyhow::Result<()> {
-        unimplemented!("Regenerate existing recipe");
-
-        let (description, ) = sqlx::query_as::<_, (String, )>("select raw_description from recipes where id = $1")
-            .bind(recipe_id)
-            .fetch_one(&context.db)
-            .await?;
-
-        let recipes_in_description = self.extract_recipes(context, description).await?;
+        let recipes_in_description = self.extract_recipes(context, &video).await?;
         tracing::info!("Found {} recipes in description", recipes_in_description.len());
 
-        // self.save_recipes(&context.db, &recipes_in_description).await?;
-        // tracing::info!("Added completed recipe to database");
-        Ok(())
-    }
-
-    async fn extract_unprocessed_recipe(&self, context: &JobContext, unprocessed_recipe_id: i32) -> anyhow::Result<()> {
-        let (instagram_id, description, ) = sqlx::query_as::<_, (String, String, )>("select instagram_id, info_json ->> 'description' from unprocessed_recipes where id = $1")
-            .bind(unprocessed_recipe_id)
-            .fetch_one(&context.db)
-            .await?;
-
-        let recipes_in_description = self.extract_recipes(context, description).await?;
-        tracing::info!("Found {} recipes in description", recipes_in_description.len());
-
-        self.save_newly_recipes(&context.raw_db, &recipes_in_description, instagram_id).await?;
+        self.save_newly_recipes(&context.db, &recipes_in_description, &video).await?;
         tracing::info!("Added completed recipe to database");
+
+        Ok(())
     }
 
-    async fn extract_recipes(&self, context: &JobContext, description: String) -> anyhow::Result<Vec<ExtractedRecipe>> {
+    async fn extract_recipes(&self, context: &JobContext, instagram_video: &Model) -> anyhow::Result<Vec<ExtractedRecipe>> {
         let client = &context.openai_client;
-        let model = &context.model;
+        let llm_model = &context.model;
+
+        let description = instagram_video.info.get("description").ok_or(anyhow!("No description in video"))?.as_str().ok_or(anyhow!("Description is not a string"))?;
 
         let prompt = format!(
             "{prompt}:\n{description}",
-            prompt = r#"/gptThis the instagram reel description of a recipie. Please extract the title of the recipie, an ingredients list, ordered instructions, and any useful notes from the description. Remove all extreneous information such as the author, biographical information, tags, someone's life story, requests for engagement, etc, only include the information I have requested, no yapping. Please provide your answer in a clear and consise manner but crucially do not skip details. There may be multiple recipies included in the description. If so please make sure to separate these out clearly with different titles and other information. Please provide this information as an array of JSON objects, one per recipie in the description. Each object you output will have three properties: "ingredients", "instructions", and "title". The "ingredients" key should contain arrays of strings, where each item in the list is an ingredient. The "instructions" key should contain arrays of strings, where each item in the list isa step in the instructions. The "title" key should be a string which is the title of the recipe. Do not wrap the JSON output in a code-block, or include any text before or after the JSON. Here is the description:"#,
+            prompt = include_str!("../../app/prompts/extract_recipe_details.txt"),
             description = description
         );
 
         tracing::info!("Prompt prepared");
 
         let completion = CreateChatCompletionRequest {
-            model: model.clone(),
+            model: llm_model.clone(),
             messages: vec![
                 ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
                     content: ChatCompletionRequestUserMessageContent::Text(prompt),
@@ -104,32 +80,21 @@ impl LLmExtractDetailsJob {
         Ok(recipes_in_description)
     }
 
-    async fn save_newly_recipes(&self, db: &PgPool, recipes_in_description: &[ExtractedRecipe], instagram_id: String) -> anyhow::Result<()> {
-        let mut txn = db.begin().await?;
+    async fn save_newly_recipes(&self, db: &DatabaseConnection, recipes_in_description: &[ExtractedRecipe], instagram_video: &Model) -> anyhow::Result<()> {
+        recipes::Entity::insert_many(recipes_in_description.iter().map(|recipe| {
+            recipes::ActiveModel {
+                instagram_video_id: Set(Some(instagram_video.id.clone())),
+                title: Set(Some(recipe.title.clone())),
+                ingredients: Set(Some(recipe.ingredients.clone())),
+                instructions: Set(Some(recipe.instructions.clone())),
+                generated_at: Set(Some(chrono::Utc::now().fixed_offset())),
 
-        for recipe in recipes_in_description {
-            tracing::info!("Add completed recipe to database, title={}", recipe.title);
-
-            sqlx::query(r#"
-                insert into recipes (instagram_id, title, raw_description, ingredients, instructions, info_json, instagram_url)
-                select instagram_id, $2, info_json ->> 'description', $3, $4, info_json, instagram_url
-                from unprocessed_recipes
-                where instagram_id = $1
-            "#)
-                .bind(&self.instagram_id)
-                .bind(&recipe.title)
-                .bind(&recipe.ingredients)
-                .bind(&recipe.instructions)
-                .execute(&mut *txn)
-                .await?;
-        }
-
-        sqlx::query("delete from unprocessed_recipes where instagram_id = $1")
-            .bind(&self.instagram_id)
-            .execute(&mut *txn)
+                ..Default::default()
+            }
+        }))
+            .exec(db)
             .await?;
 
-        txn.commit().await?;
         Ok(())
     }
 }

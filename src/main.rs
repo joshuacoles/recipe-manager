@@ -25,7 +25,7 @@ use crate::jobs::{JOB_CONTEXT, JobContext};
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
-use sea_orm::{DatabaseConnection, EntityTrait, QuerySelect, SelectColumns};
+use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 
@@ -120,15 +120,10 @@ async fn main() -> Result<(), anyhow::Error> {
 async fn transcribe_recipe(
     Path((id, )): Path<(u32, )>,
     Extension(mut jobs): Extension<FangQueue>,
-    Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
-    let (instagram_id, ) = entities::recipes::Entity::find_by_id(id as i32)
-        .select_only()
-        .select_column(entities::recipes::Column::InstagramId)
-        .into_tuple::<(String, )>()
-        .one(&db).await.unwrap().unwrap();
-
-    let job = jobs::extract_transcript::ExtractTranscript::new(instagram_id);
+    let job = jobs::extract_transcript::ExtractTranscript {
+        video_id: id as i32,
+    };
 
     jobs.insert_task(&job).await.unwrap();
 
