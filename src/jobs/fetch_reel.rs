@@ -12,8 +12,10 @@ use sea_orm::ActiveValue::Set;
 use serde_json::Value;
 use tempfile::TempDir;
 use crate::entities::instagram_video;
+use crate::entities::instagram_video::Model;
+use crate::entities::prelude::InstagramVideo;
 use crate::jobs::{JOB_CONTEXT, JobContext};
-use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
+use crate::jobs::extract_transcript::ExtractTranscript;
 
 lazy_static! {
     static ref REEL_REGEX: regex::Regex = regex::Regex::new(r"https://www.instagram.com/reel/([a-zA-Z0-9_-]+)/.+").expect("Failed to compile regex");
@@ -37,7 +39,7 @@ impl FetchReelJob {
         })
     }
 
-    pub async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
+    pub async fn exec(&self, context: &JobContext) -> anyhow::Result<Option<Model>> {
         tracing::info!("Fetching reel");
         let temp_dir = TempDir::new()?;
 
@@ -48,7 +50,7 @@ impl FetchReelJob {
 
         if existing.is_some() {
             tracing::info!("Unprocessed recipe already exists skipping...");
-            return Ok(());
+            return Ok(None);
         }
 
         tracing::info!("Downloading reel");
@@ -79,7 +81,7 @@ impl FetchReelJob {
 
         tracing::info!("Adding to unprocessed_recipes");
 
-        instagram_video::ActiveModel {
+        let video = instagram_video::ActiveModel {
             instagram_id: Set(self.reel_id.clone()),
             video_url: Set(self.reel_url.clone()),
             info: Set(info),
@@ -87,20 +89,26 @@ impl FetchReelJob {
             ..Default::default()
         }.insert(&context.db).await?;
 
-        Ok(())
+        Ok(Some(video))
     }
 }
 
 #[typetag::serde]
 #[async_trait]
 impl AsyncRunnable for FetchReelJob {
-    #[tracing::instrument(skip(_queue))]
-    async fn run(&self, _queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+    #[tracing::instrument(skip(queue))]
+    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         let context = JOB_CONTEXT.get()
             .ok_or(FangError { description: "Failed to read context".to_string() })?;
 
-        self.exec(context).await
+        let new_video = self.exec(context).await
             .map_err(|e| FangError { description: e.to_string() })?;
+
+        if let Some(video) = new_video {
+            queue.insert_task(&ExtractTranscript {
+                video_id: video.id,
+            }).await.unwrap();
+        }
 
         Ok(())
     }

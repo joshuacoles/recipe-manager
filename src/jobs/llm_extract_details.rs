@@ -4,8 +4,7 @@ use fang::{AsyncRunnable, FangError};
 use fang::asynk::async_queue::AsyncQueueable;
 use fang::serde::{Deserialize, Serialize};
 use fang::async_trait;
-use sea_orm::{DatabaseConnection, EntityTrait, NotSet, Related, Set};
-use sqlx::PgPool;
+use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use crate::jobs::{JOB_CONTEXT, JobContext};
 use crate::entities::{instagram_video, recipes};
 use crate::entities::instagram_video::Model;
@@ -29,7 +28,7 @@ impl LLmExtractDetailsJob {
     async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
         tracing::info!("Using LLM to extract details from recipe description");
 
-        let video: instagram_video::Model = instagram_video::Entity::find()
+        let video: Model = instagram_video::Entity::find()
             .filter(instagram_video::Column::Id.eq(self.video_id))
             .one(&context.db)
             .await?.ok_or(anyhow!("Video not found"))?;
@@ -102,8 +101,8 @@ impl LLmExtractDetailsJob {
 #[typetag::serde]
 #[async_trait]
 impl AsyncRunnable for LLmExtractDetailsJob {
-    #[tracing::instrument(skip(_queueable))]
-    async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+    #[tracing::instrument(skip(_queue))]
+    async fn run(&self, _queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         let context = JOB_CONTEXT.get()
             .ok_or(FangError { description: "Failed to read context".to_string() })?;
 

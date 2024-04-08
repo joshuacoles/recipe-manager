@@ -61,13 +61,17 @@ impl ExtractTranscript {
 #[typetag::serde]
 #[async_trait]
 impl AsyncRunnable for ExtractTranscript {
-    #[tracing::instrument(skip(_queue))]
-    async fn run(&self, _queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+    #[tracing::instrument(skip(queue))]
+    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         let context = JOB_CONTEXT.get()
             .ok_or(FangError { description: "Failed to read context".to_string() })?;
 
         self.exec(context).await
             .map_err(|e| FangError { description: e.to_string() })?;
+
+        queue.insert_task(&crate::jobs::llm_extract_details::LLmExtractDetailsJob {
+            video_id: self.video_id,
+        }).await?;
 
         Ok(())
     }
