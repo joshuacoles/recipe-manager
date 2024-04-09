@@ -9,4 +9,3 @@ module.exports = {
   plugins: [],
   output: "./public/css/tailwind.css",
 }
-

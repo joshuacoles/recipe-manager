@@ -9,43 +9,81 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/themes/light.css"/>
     <script type="module"
             src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.15.0/cdn/shoelace-autoloader.js"></script>
+
+    <script src="https://unpkg.com/htmx.org@1.9.11"></script>
 </head>
 
 <body class="bg-gray-100">
 <div class="container mx-auto px-4 py-8">
     <h1 class="text-4xl font-bold mb-8 text-center">Recipe List</h1>
 
-    <!-- New recipe button -->
+    <dialog id="new-recipe-dialogue" class="py-8 px-6 border-2 border-gray-200 rounded-md">
+        <h2 class="text-xl mb-4">New Recipe</h2>
 
-    <sl-dialog label="Dialog" class="dialog-overview">
-        <h2 slot="label">New Recipe</h2>
-        <form class="flex flex-col gap-2" action="/recipes" method="POST">
-            <sl-input name="reel_url" placeholder="Instagram URL" required></sl-input>
-            <div class="flex justify-between">
-                <sl-button type="submit" slot="footer">Save</sl-button>
-                <sl-button type="button" slot="footer" class="dialog-cancel">Cancel</sl-button>
+        <form class="flex flex-col w-[60vw] max-w-lg" hx-post="/recipes">
+            <div class="mb-6">
+                <label for="reel-url" class="block text-md font-medium leading-6 text-gray-900">Reel URL</label>
+                <input
+                        id="reel-url"
+                        name="reel_url"
+                        class="indent-1.5 block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                        type="url"
+                        pattern="https://www.instagram.com/reel/.+"
+                        required
+                        aria-label="Instagram Reel URL"
+                        autofocus
+                />
+            </div>
+
+
+            <div class="flex gap-4 justify-between">
+                <button type="submit"
+                        class="inline-flex w-full justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 sm:col-start-2">
+                    Save
+                </button>
+                <button type="button"
+                        class="dialog-cancel mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 sm:col-start-1 sm:mt-0">
+                    Cancel
+                </button>
             </div>
         </form>
-    </sl-dialog>
+    </dialog>
 
-    <sl-button class="mb-4">New Recipe</sl-button>
+    <button
+            type="button"
+            class="rounded-md bg-indigo-500 px-3.5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500"
+    >
+        New Recipe
+    </button>
 
-    <ul class="flex flex-col gap-6">
+    <ul class="flex flex-col gap-6 mt-8">
         {% for recipe in recipes %}
-        <li>
-            <a href="/recipes/{{ recipe.id }}" class="p-2 rounded-md rounded-md bg-white text-blue-500 hover:underline">{{ recipe.title }}</a>
+        <li class="recipe-box p-2 rounded-md rounded-md bg-white cursor-pointer"
+            data-url="/recipes/{{ recipe.id }}"
+        >
+            <h3 class="text-xl">{{ recipe.title }}</h3>
+            <!--<p>Description</p>-->
         </li>
         {% endfor %}
     </ul>
 </div>
 
 <script>
-    const dialog = document.querySelector('.dialog-overview');
+    const dialog = document.querySelector('dialog');
+    const form = dialog.querySelector('form');
     const openButton = dialog.nextElementSibling;
-    const closeButton = dialog.querySelector('sl-button.dialog-cancel');
+    const closeButton = dialog.querySelector('button.dialog-cancel');
 
-    openButton.addEventListener('click', () => dialog.show());
-    closeButton.addEventListener('click', () => dialog.hide());
+    openButton.addEventListener('click', () => dialog.showModal());
+    closeButton.addEventListener('click', () => dialog.close());
+    form.addEventListener('submit', () => dialog.close());
+
+    const recipeBoxes = document.querySelectorAll('.recipe-box')
+    for (const recipeBox of recipeBoxes) {
+        recipeBox.addEventListener('click', (ev) => {
+            window.location.href = ev.currentTarget.dataset['url']
+        })
+    }
 </script>
 </body>
 </html>
