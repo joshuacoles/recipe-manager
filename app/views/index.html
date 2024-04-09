@@ -28,12 +28,12 @@
         </form>
     </sl-dialog>
 
-    <sl-button>New Recipe</sl-button>
+    <sl-button class="mb-4">New Recipe</sl-button>
 
-    <ul class="flex flex-column">
+    <ul class="flex flex-col gap-6">
         {% for recipe in recipes %}
-        <li class="p-2 rounded-md bg-white">
-            <a href="/recipes/{{ recipe.id }}" class="text-blue-500 hover:underline">{{ recipe.title }}</a>
+        <li>
+            <a href="/recipes/{{ recipe.id }}" class="p-2 rounded-md rounded-md bg-white text-blue-500 hover:underline">{{ recipe.title }}</a>
         </li>
         {% endfor %}
     </ul>

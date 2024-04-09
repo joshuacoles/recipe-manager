@@ -34,18 +34,25 @@
                     </div>
                 </div>
                 <div class="flex justify-between mb-6">
-                    <a href="{{ instagram_url }}" class="text-blue-500 hover:underline" id="recipe-url" target="_blank">View on
+                    <a href="{{ instagram_video.video_url }}" class="text-blue-500 hover:underline" id="recipe-url" target="_blank">View on
                         Instagram</a>
                 </div>
 
-                <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
-                    <summary class="text-blue-500 cursor-pointer">Raw Description</summary>
-                    <pre class="p-4 w-full text-wrap font-sans">{{ raw_description | replace("\u00A0", " ") }}</pre>
+                <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md mb-4">
+                    <summary class="text-blue-500 cursor-pointer">Original Description</summary>
+                    <pre class="p-4 w-full text-wrap font-sans">{{ instagram_video.info.description | replace("\u00A0", " ") }}</pre>
                 </details>
+
+                {% if instagram_video.transcript %}
+                    <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
+                        <summary class="text-blue-500 cursor-pointer">Transcript</summary>
+                        <pre class="p-4 w-full text-wrap font-sans">{{ instagram_video.transcript }}</pre>
+                    </details>
+                {% endif %}
             </div>
             <div>
                 <video controls>
-                    <source src="/videos/{{instagram_id}}" type="video/mp4">
+                    <source src="/videos/{{instagram_video.instagram_id}}" type="video/mp4">
                     Your browser does not support the video tag.
                 </video>
             </div>

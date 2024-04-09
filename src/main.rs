@@ -3,6 +3,7 @@ mod cli;
 mod entities;
 
 use std::path::PathBuf;
+use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::Parser;
 use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls};
@@ -17,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum_extra::routing::Resource;
 use serde::{Deserialize};
-use serde_json::{json};
+use serde_json::{json, Value};
 use tower_http::services::{ServeDir, ServeFile};
 use cli::Cli;
 use crate::jobs::{JOB_CONTEXT, JobContext};
@@ -25,9 +26,12 @@ use crate::jobs::{JOB_CONTEXT, JobContext};
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
-use sea_orm::{DatabaseConnection, EntityTrait};
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement};
+use sea_orm::DatabaseBackend::Postgres;
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
+use sqlx::types::JsonValue;
+use crate::entities::prelude::InstagramVideo;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -147,17 +151,29 @@ async fn recipes_index(
     }
 }
 
+async fn load_nested_recipe(recipe_id: i32, db: &DatabaseConnection) -> anyhow::Result<Value> {
+    let recipe = db.query_one(Statement::from_sql_and_values(
+        Postgres,
+        r#"
+        select to_jsonb(r) || jsonb_build_object('instagram_video', to_jsonb(iv) || jsonb_build_object('transcript', t.content)) as json
+from recipes r
+         left join public.instagram_video iv on iv.id = r.instagram_video_id
+         left join public.transcript t on iv.transcript_id = t.id
+where r.id = $1;
+        "#,
+        vec![recipe_id.into()]
+    )).await?.ok_or(anyhow!("Unknown recipe id"))?.try_get_by::<Value, _>("json")?;
+
+    Ok(recipe)
+}
+
 async fn show_recipe(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
     Path((recipe_id, )): Path<(u32, )>,
 ) -> impl IntoResponse {
-    let recipe = entities::recipes::Entity::find_by_id(recipe_id as i32)
-        .one(&db)
-        .await
-        .unwrap()
-        .unwrap();
+    let recipe = load_nested_recipe(recipe_id as i32, &db).await.unwrap();
 
     match header_map.get(ACCEPT) {
         Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
