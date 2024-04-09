@@ -17,11 +17,12 @@ pub struct JobContext {
     pub yt_dlp_command_string: OsString,
     pub reel_dir: PathBuf,
     pub openai_client: Client<OpenAIConfig>,
+    pub openai_direct_client: Client<OpenAIConfig>,
     pub model: String,
 }
 
 impl JobContext {
-    pub fn new(p0: DatabaseConnection, raw_db: PgPool, p1: &Option<PathBuf>, p2: PathBuf, p3: Client<OpenAIConfig>, model: String) -> JobContext {
+    pub fn new(p0: DatabaseConnection, raw_db: PgPool, p1: &Option<PathBuf>, p2: PathBuf, p3: Client<OpenAIConfig>, p4: Client<OpenAIConfig>, model: String) -> JobContext {
         JobContext {
             db: p0,
             raw_db,
@@ -29,7 +30,8 @@ impl JobContext {
                 .map_or_else(|| "yt-dlp".into(), |p| p.into()),
             reel_dir: p2,
             openai_client: p3,
-            model
+            openai_direct_client: p4,
+            model,
         }
     }
 

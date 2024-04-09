@@ -1,5 +1,7 @@
 use anyhow::anyhow;
-use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent, CreateChatCompletionRequest};
+use async_openai::Client;
+use async_openai::config::OpenAIConfig;
+use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, ChatCompletionRequestUserMessageContent, CreateChatCompletionRequest, CreateChatCompletionResponse};
 use fang::{AsyncRunnable, FangError};
 use fang::asynk::async_queue::AsyncQueueable;
 use fang::serde::{Deserialize, Serialize};
@@ -24,6 +26,24 @@ struct ExtractedRecipe {
     instructions: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum AcceptableResponses {
+    Array(Vec<ExtractedRecipe>),
+    Object {
+        recipes: Vec<ExtractedRecipe>
+    }
+}
+
+impl AcceptableResponses {
+    fn retrieve(self) -> Vec<ExtractedRecipe> {
+        match self {
+            AcceptableResponses::Array(recipes) => recipes,
+            AcceptableResponses::Object { recipes } => recipes,
+        }
+    }
+}
+
 impl LLmExtractDetailsJob {
     async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
         tracing::info!("Using LLM to extract details from recipe description");
@@ -46,12 +66,22 @@ impl LLmExtractDetailsJob {
         let client = &context.openai_client;
         let llm_model = &context.model;
 
+        let transcript = match instagram_video.transcript_id {
+            Some(transcript_id) => {
+                crate::entities::transcript::Entity::find_by_id(transcript_id)
+                    .one(&context.db)
+                    .await?.ok_or(anyhow!("Invalid transcript id"))?.content
+            }
+            None => String::new(),
+        };
+
         let description = instagram_video.info.get("description").ok_or(anyhow!("No description in video"))?.as_str().ok_or(anyhow!("Description is not a string"))?;
 
         let prompt = format!(
-            "{prompt}:\n{description}",
+            "{prompt}:\n{description}\n\n{transcript}",
             prompt = include_str!("../../app/prompts/extract_recipe_details.txt"),
-            description = description
+            description = description,
+            transcript = transcript
         );
 
         tracing::info!("Prompt prepared");
@@ -68,14 +98,20 @@ impl LLmExtractDetailsJob {
             ..Default::default()
         };
 
-        let completion = client.chat().create(completion).await?;
+        let recipes_in_description = Self::parse_response(client, completion).await?;
+        Ok(recipes_in_description)
+    }
+
+    async fn parse_response(client: &Client<OpenAIConfig>, response: CreateChatCompletionRequest) -> anyhow::Result<Vec<ExtractedRecipe>> {
+        let completion = client.chat().create(response).await?;
         tracing::info!("Response received: {:#?}", completion);
 
         let response = &completion.choices[0];
         let message = response.message.content.clone().ok_or(anyhow!("No content in response"))?;
         let message = message.replace("```json\n", "").replace("```", "");
 
-        let recipes_in_description = serde_json::from_str::<Vec<ExtractedRecipe>>(&message)?;
+        let recipes_in_description = serde_json::from_str::<AcceptableResponses>(&message)?.retrieve();
+
         Ok(recipes_in_description)
     }
 

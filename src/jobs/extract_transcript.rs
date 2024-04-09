@@ -15,7 +15,7 @@ pub struct ExtractTranscript {
 impl ExtractTranscript {
     pub async fn extract_transcript(&self, video_path: &Path, context: &JobContext) -> anyhow::Result<String> {
         // Does this work on ollama?
-        let output = context.openai_client.audio().transcribe(CreateTranscriptionRequest {
+        let output = context.openai_direct_client.audio().transcribe_raw(CreateTranscriptionRequest {
             model: "whisper-1".to_string(),
             response_format: Some(AudioResponseFormat::Text),
             language: Some("en".to_string()),
@@ -26,7 +26,7 @@ impl ExtractTranscript {
             ..Default::default()
         }).await?;
 
-        let content = output.text;
+        let content = String::from_utf8(output.to_vec())?;
 
         Ok(content)
     }

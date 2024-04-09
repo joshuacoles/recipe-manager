@@ -23,6 +23,10 @@ pub struct Cli {
     #[clap(long = "openai-api-key", env = "RECIPE_OPENAI_API_KEY", default_value="ollama")]
     pub openai_api_key: String,
 
+    /// Direct OpenAI API key
+    #[clap(long = "direct-openai-api-key", env = "RECIPE_DIRECT_OPENAI_API_KEY")]
+    pub direct_openai_api_key: String,
+
     /// OpenAI API model
     #[clap(long = "model", env = "RECIPE_OPENAI_MODEL", default_value = "gemma")]
     pub openai_model: String,
