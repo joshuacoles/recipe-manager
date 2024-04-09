@@ -13,7 +13,6 @@ use serde_json::Value;
 use tempfile::TempDir;
 use crate::entities::instagram_video;
 use crate::entities::instagram_video::Model;
-use crate::entities::prelude::InstagramVideo;
 use crate::jobs::{JOB_CONTEXT, JobContext};
 use crate::jobs::extract_transcript::ExtractTranscript;
 

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use clap::Parser;
-use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls};
+use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls, Serialize};
 use jobs::fetch_reel::FetchReelJob;
 use axum::{Extension, Form, Json, Router, routing::get};
 use axum::body::Body;
@@ -26,12 +26,12 @@ use crate::jobs::{JOB_CONTEXT, JobContext};
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
-use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement};
+use notify::Watcher;
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult, QuerySelect, Statement};
 use sea_orm::DatabaseBackend::Postgres;
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
-use sqlx::types::JsonValue;
-use crate::entities::prelude::InstagramVideo;
+use tower_livereload::LiveReloadLayer;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -91,6 +91,9 @@ async fn main() -> Result<(), anyhow::Error> {
         // `GET /recipes/:id`
         .show(show_recipe);
 
+    let livereload = LiveReloadLayer::new();
+    let reloader = livereload.reloader();
+
     let app = Router::new()
         .route("/api/recipes/:id/transcribe", post(transcribe_recipe))
         .route("/videos/:instagram_id", get(get_video))
@@ -100,7 +103,16 @@ async fn main() -> Result<(), anyhow::Error> {
         .layer(Extension(db.clone()))
         .layer(Extension(queue.clone()))
         .layer(Extension(template_engine))
-        .layer(Extension(job_context));
+        .layer(Extension(job_context))
+        .layer(livereload);
+
+    let mut watcher = notify::recommended_watcher(move |_| {
+        tracing::info!("Reloading...");
+        reloader.reload()
+    })?;
+
+    watcher.watch(&PathBuf::from("./app/views"), notify::RecursiveMode::Recursive)?;
+    watcher.watch(&PathBuf::from("./public"), notify::RecursiveMode::Recursive)?;
 
     let mut pool: AsyncWorkerPool<AsyncQueue<NoTls>> = AsyncWorkerPool::builder()
         .number_of_workers(2u32)
@@ -134,20 +146,36 @@ async fn transcribe_recipe(
     (StatusCode::OK, "Transcription task queued")
 }
 
+#[derive(Serialize, FromQueryResult)]
+struct RecipeIdTitle {
+    id: i32,
+    title: String
+}
+
 async fn recipes_index(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
-    let recipes = entities::recipes::Entity::find()
-        .all(&db)
-        .await
-        .unwrap();
-
     match header_map.get(ACCEPT) {
-        Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
-            Json(recipes).into_response(),
-        _ => RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response()
+        Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) => {
+            let recipes = entities::recipes::Entity::find()
+                .all(&db)
+                .await
+                .unwrap();
+
+            Json(recipes).into_response()
+        }
+
+        _ => {
+            let recipes = entities::recipes::Entity::find()
+                .select_only()
+                .columns([entities::recipes::Column::Id, entities::recipes::Column::Title])
+                .into_model::<RecipeIdTitle>()
+                .all(&db).await.unwrap();
+
+            RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response()
+        }
     }
 }
 
