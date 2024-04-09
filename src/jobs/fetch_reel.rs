@@ -52,7 +52,7 @@ impl FetchReelJob {
             .await?;
 
         if existing.is_some() {
-            tracing::info!("Unprocessed recipe already exists skipping...");
+            tracing::info!("Video already in the system... skipping");
             return Ok(None);
         }
 
@@ -113,6 +113,7 @@ impl AsyncRunnable for FetchReelJob {
             })?;
 
         if let Some(video) = new_video {
+            tracing::info!("Running transcript extraction job");
             queue.insert_task(&ExtractTranscript {
                 video_id: video.id,
             }).await.unwrap();

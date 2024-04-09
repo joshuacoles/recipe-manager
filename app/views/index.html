@@ -20,7 +20,7 @@
     <dialog id="new-recipe-dialogue" class="py-8 px-6 border-2 border-gray-200 rounded-md">
         <h2 class="text-xl mb-4">New Recipe</h2>
 
-        <form class="flex flex-col w-[60vw] max-w-lg" hx-post="/recipes">
+        <form class="flex flex-col w-[60vw] max-w-lg" hx-post="/recipes" hx-swap="#none">
             <div class="mb-6">
                 <label for="reel-url" class="block text-md font-medium leading-6 text-gray-900">Reel URL</label>
                 <input
@@ -34,7 +34,6 @@
                         autofocus
                 />
             </div>
-
 
             <div class="flex gap-4 justify-between">
                 <button type="submit"

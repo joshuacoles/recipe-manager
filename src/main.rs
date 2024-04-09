@@ -101,9 +101,9 @@ async fn main() -> Result<(), anyhow::Error> {
     let reloader = livereload.reloader();
 
     let app = Router::new()
-        .route("/api/recipes/:id/transcribe", post(transcribe_recipe))
-        .route("/videos/:instagram_id", get(get_video))
         .merge(recipes)
+        .route("/recipes/:id/transcribe", post(transcribe_recipe))
+        .route("/videos/:instagram_id", get(get_video))
         .nest_service("/public", ServeDir::new("./public"))
         .layer(Extension(seaorm.clone()))
         .layer(Extension(db.clone()))
@@ -149,7 +149,7 @@ async fn transcribe_recipe(
 
     jobs.insert_task(&job).await.unwrap();
 
-    (StatusCode::OK, "Transcription task queued")
+    StatusCode::CREATED
 }
 
 #[derive(Serialize, FromQueryResult)]
@@ -189,7 +189,7 @@ async fn load_nested_recipe(recipe_id: i32, db: &DatabaseConnection) -> anyhow::
     let recipe = db.query_one(Statement::from_sql_and_values(
         Postgres,
         r#"
-        select to_jsonb(r) || jsonb_build_object('instagram_video', to_jsonb(iv) || jsonb_build_object('transcript', t.content)) as json
+        select to_jsonb(r) || jsonb_build_object('instagram_video', to_jsonb(iv) || jsonb_build_object('transcript', t)) as json
 from recipes r
          left join public.instagram_video iv on iv.id = r.instagram_video_id
          left join public.transcript t on iv.transcript_id = t.id
@@ -271,10 +271,10 @@ async fn create_recipe_from_reel(
     return match FetchReelJob::new(request.reel_url) {
         Ok(job) => {
             queue.insert_task(&job).await.unwrap();
-            (StatusCode::OK, "Recipe creation task queued")
+            StatusCode::CREATED.into_response()
         }
 
-        Err(_) => (StatusCode::BAD_REQUEST, "Invalid reel URL"),
+        Err(_) => (StatusCode::BAD_REQUEST, "Invalid reel URL").into_response(),
     };
 }
 

@@ -1,8 +1,10 @@
-use std::path::Path;
-use async_openai::types::{AudioInput, AudioResponseFormat, CreateTranscriptionRequest, InputSource};
+use std::path::{Path, PathBuf};
+use anyhow::bail;
+use async_openai::types::{AudioInput, AudioResponseFormat, CreateTranscriptionRequest, CreateTranscriptionResponseVerboseJson, InputSource, TimestampGranularity};
 use async_trait::async_trait;
 use fang::{AsyncQueueable, AsyncRunnable, Deserialize, FangError, Serialize};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, NotSet, QueryFilter, QuerySelect, SelectColumns, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, NotSet, QueryFilter, QuerySelect, Set};
+use tokio::process::Command;
 use crate::jobs::{JOB_CONTEXT, JobContext};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -13,39 +15,80 @@ pub struct ExtractTranscript {
 
 
 impl ExtractTranscript {
-    pub async fn extract_transcript(&self, video_path: &Path, context: &JobContext) -> anyhow::Result<String> {
+    async fn extract_transcript(&self, video_path: &Path, context: &JobContext) -> anyhow::Result<CreateTranscriptionResponseVerboseJson> {
+        let audio_path = self.extract_audio(&video_path).await?;
+
         // Does this work on ollama?
-        let output = context.openai_direct_client.audio().transcribe_raw(CreateTranscriptionRequest {
+        // Answer: no
+        let output = context.openai_direct_client.audio().transcribe_verbose_json(CreateTranscriptionRequest {
             model: "whisper-1".to_string(),
-            response_format: Some(AudioResponseFormat::Text),
+            response_format: Some(AudioResponseFormat::VerboseJson),
             language: Some("en".to_string()),
             file: AudioInput {
-                source: InputSource::Path { path: video_path.to_path_buf() }
+                source: InputSource::Path { path: audio_path }
             },
-            timestamp_granularities: None,
+            timestamp_granularities: Some(vec![TimestampGranularity::Segment]),
             ..Default::default()
         }).await?;
 
-        let content = String::from_utf8(output.to_vec())?;
+        Ok(output)
+    }
 
-        Ok(content)
+    async fn extract_audio(&self, video_path: &Path) -> anyhow::Result<PathBuf> {
+        let audio_path = video_path.with_extension("audio.mp3");
+
+        if audio_path.exists() {
+            tracing::info!("Audio already extracted");
+            return Ok(audio_path);
+        }
+
+        let output = Command::new("ffmpeg")
+            .arg("-i")
+            .arg(video_path)
+            .arg(&audio_path)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            bail!("Error occurred when extracting audio {:?}", String::from_utf8_lossy(&output.stderr))
+        }
+
+        Ok(audio_path)
     }
 
     pub async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
-        let (reel_id, ) = crate::entities::instagram_video::Entity::find()
+        let (reel_id, existing_transcript) = crate::entities::instagram_video::Entity::find()
             .select_only()
-            .select_column(crate::entities::instagram_video::Column::InstagramId)
+            .columns([
+                crate::entities::instagram_video::Column::InstagramId,
+                crate::entities::instagram_video::Column::TranscriptId,
+            ])
             .filter(crate::entities::instagram_video::Column::Id.eq(self.video_id))
-            .into_tuple::<(String, )>()
+            .into_tuple::<(String, Option<i32>)>()
             .one(&context.db).await?
             .ok_or(anyhow::anyhow!("Video not found"))?;
+
+        // Remove existing transcript if it exists
+        if let Some(existing_transcript) = existing_transcript {
+            tracing::info!("Removing existing transcript");
+
+            crate::entities::instagram_video::Entity::update(crate::entities::instagram_video::ActiveModel {
+                id: Set(self.video_id),
+                transcript_id: Set(None),
+                ..Default::default()
+            }).exec(&context.db).await?;
+
+            crate::entities::transcript::Entity::delete_by_id(existing_transcript)
+                .exec(&context.db).await?;
+        }
 
         let video_path = context.video_path(&reel_id);
         let transcript = self.extract_transcript(&video_path, context).await?;
 
         let v = crate::entities::transcript::ActiveModel {
             id: NotSet,
-            content: Set(transcript),
+            content: Set(transcript.text.clone()),
+            json: Set(Some(serde_json::to_value(transcript)?)),
         }.save(&context.db).await?;
 
         crate::entities::instagram_video::Entity::update(crate::entities::instagram_video::ActiveModel {

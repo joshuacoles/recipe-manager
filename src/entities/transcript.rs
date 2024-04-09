@@ -10,6 +10,8 @@ pub struct Model {
     pub id: i32,
     #[sea_orm(column_type = "Text")]
     pub content: String,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub json: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

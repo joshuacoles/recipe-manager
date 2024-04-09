@@ -28,7 +28,7 @@ pub struct Cli {
     pub direct_openai_api_key: String,
 
     /// OpenAI API model
-    #[clap(long = "model", env = "RECIPE_OPENAI_MODEL", default_value = "gemma")]
+    #[clap(long = "model", env = "RECIPE_OPENAI_MODEL", default_value = "llama2")]
     pub openai_model: String,
 
     /// OpenAI Base url
