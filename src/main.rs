@@ -1,34 +1,36 @@
-mod jobs;
 mod cli;
 mod entities;
+mod jobs;
 
-use std::path::PathBuf;
+use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::anyhow;
 use async_trait::async_trait;
-use clap::Parser;
-use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls, Serialize};
-use jobs::fetch_reel::FetchReelJob;
-use axum::{Extension, Form, Json, Router, routing::get};
 use axum::body::Body;
-use axum::extract::{FromRequest, Path, Request};
 use axum::extract::rejection::{FormRejection, JsonRejection};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::extract::{FromRequest, Path, Request};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
+use axum::{routing::get, Extension, Form, Json, Router};
 use axum_extra::routing::Resource;
-use serde::{Deserialize};
-use serde_json::{json, Value};
-use tower_http::services::{ServeDir, ServeFile};
+use clap::Parser;
 use cli::Cli;
-use crate::jobs::{JOB_CONTEXT, JobContext};
+use fang::{AsyncQueue, AsyncQueueable, AsyncWorkerPool, NoTls, Serialize};
+use jobs::fetch_reel::FetchReelJob;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::path::PathBuf;
+use tower_http::services::{ServeDir, ServeFile};
 
 use axum_template::{engine::Engine, RenderHtml};
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
 use notify::Watcher;
-use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult, QuerySelect, Statement};
 use sea_orm::DatabaseBackend::Postgres;
+use sea_orm::{
+    ConnectionTrait, DatabaseConnection, EntityTrait, FromQueryResult, QuerySelect, Statement,
+};
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use tower_livereload::LiveReloadLayer;
@@ -41,22 +43,18 @@ async fn main() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
     cli.validate_reel_dir()?;
 
-    let db = PgPool::connect(&cli.database_url)
-        .await?;
+    let db = PgPool::connect(&cli.database_url).await?;
 
     let seaorm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.clone());
 
-    sqlx::migrate!()
-        .run(&db)
-        .await?;
+    sqlx::migrate!().run(&db).await?;
 
     let mut queue = AsyncQueue::builder()
         .uri(&cli.database_url)
         .max_pool_size(2u32)
         .build();
 
-    queue.connect(NoTls)
-        .await?;
+    queue.connect(NoTls).await?;
 
     let job_context = JobContext::new(
         seaorm.clone(),
@@ -65,8 +63,8 @@ async fn main() -> Result<(), anyhow::Error> {
         cli.reel_dir.clone(),
         cli.openai_client()?,
         {
-            let config = async_openai::config::OpenAIConfig::new()
-                .with_api_key(&cli.direct_openai_api_key);
+            let config =
+                async_openai::config::OpenAIConfig::new().with_api_key(&cli.direct_openai_api_key);
 
             async_openai::Client::with_config(config)
         },
@@ -77,8 +75,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // Set up the `minijinja` engine with the same route paths as the Axum router
     let jinja = AutoReloader::new(move |notifier| {
-        let template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("./app/views");
+        let template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("./app/views");
 
         let mut env = Environment::new();
         env.set_loader(path_loader(&template_path));
@@ -117,7 +114,10 @@ async fn main() -> Result<(), anyhow::Error> {
         reloader.reload()
     })?;
 
-    watcher.watch(&PathBuf::from("./app/views"), notify::RecursiveMode::Recursive)?;
+    watcher.watch(
+        &PathBuf::from("./app/views"),
+        notify::RecursiveMode::Recursive,
+    )?;
     watcher.watch(&PathBuf::from("./public"), notify::RecursiveMode::Recursive)?;
 
     let mut pool: AsyncWorkerPool<AsyncQueue<NoTls>> = AsyncWorkerPool::builder()
@@ -140,7 +140,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn transcribe_recipe(
-    Path((id, )): Path<(u32, )>,
+    Path((id,)): Path<(u32,)>,
     Extension(mut jobs): Extension<FangQueue>,
 ) -> impl IntoResponse {
     let job = jobs::extract_transcript::ExtractTranscript {
@@ -155,7 +155,7 @@ async fn transcribe_recipe(
 #[derive(Serialize, FromQueryResult)]
 struct RecipeIdTitle {
     id: i32,
-    title: String
+    title: String,
 }
 
 async fn recipes_index(
@@ -164,11 +164,13 @@ async fn recipes_index(
     Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
     match header_map.get(ACCEPT) {
-        Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) => {
-            let recipes = entities::recipes::Entity::find()
-                .all(&db)
-                .await
-                .unwrap();
+        Some(hv)
+            if hv
+                .to_str()
+                .map(|hv| hv == "application/json")
+                .unwrap_or(false) =>
+        {
+            let recipes = entities::recipes::Entity::find().all(&db).await.unwrap();
 
             Json(recipes).into_response()
         }
@@ -176,9 +178,14 @@ async fn recipes_index(
         _ => {
             let recipes = entities::recipes::Entity::find()
                 .select_only()
-                .columns([entities::recipes::Column::Id, entities::recipes::Column::Title])
+                .columns([
+                    entities::recipes::Column::Id,
+                    entities::recipes::Column::Title,
+                ])
                 .into_model::<RecipeIdTitle>()
-                .all(&db).await.unwrap();
+                .all(&db)
+                .await
+                .unwrap();
 
             RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response()
         }
@@ -205,14 +212,20 @@ async fn show_recipe(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
-    Path((recipe_id, )): Path<(u32, )>,
+    Path((recipe_id,)): Path<(u32,)>,
 ) -> impl IntoResponse {
     let recipe = load_nested_recipe(recipe_id as i32, &db).await.unwrap();
 
     match header_map.get(ACCEPT) {
-        Some(hv) if hv.to_str().map(|hv| hv == "application/json").unwrap_or(false) =>
-            Json(recipe).into_response(),
-        _ => RenderHtml("recipe.html", template_engine, recipe).into_response()
+        Some(hv)
+            if hv
+                .to_str()
+                .map(|hv| hv == "application/json")
+                .unwrap_or(false) =>
+        {
+            Json(recipe).into_response()
+        }
+        _ => RenderHtml("recipe.html", template_engine, recipe).into_response(),
     }
 }
 
@@ -241,9 +254,9 @@ impl<T> FormOrJson<T> {
 
 #[async_trait]
 impl<T, S> FromRequest<S> for FormOrJson<T>
-    where
-        T: DeserializeOwned,
-        S: Send + Sync,
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
 {
     type Rejection = Response;
 
@@ -278,7 +291,11 @@ async fn create_recipe_from_reel(
     };
 }
 
-async fn get_video(Extension(context): Extension<JobContext>, headers: HeaderMap, Path((instagram_id, )): Path<(String, )>) -> impl IntoResponse {
+async fn get_video(
+    Extension(context): Extension<JobContext>,
+    headers: HeaderMap,
+    Path((instagram_id,)): Path<(String,)>,
+) -> impl IntoResponse {
     let video_path = context.video_path(&instagram_id);
 
     let mut req = Request::new(Body::empty());

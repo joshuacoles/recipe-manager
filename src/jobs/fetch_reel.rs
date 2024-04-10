@@ -1,24 +1,26 @@
-use std::fmt::Debug;
-use std::fs::File;
-use anyhow::{anyhow, bail};
-use tokio::process::Command;
-use fang::{AsyncRunnable, FangError};
-use fang::asynk::async_queue::AsyncQueueable;
-use fang::serde::{Deserialize, Serialize};
-use fang::async_trait;
-use lazy_static::lazy_static;
-use sea_orm::{ActiveModelTrait, EntityTrait, QueryFilter, QuerySelect};
-use sea_orm::ActiveValue::Set;
-use serde_json::Value;
-use tempfile::TempDir;
 use crate::entities::instagram_video;
 use crate::entities::instagram_video::Model;
-use crate::jobs::{JOB_CONTEXT, JobContext};
 use crate::jobs::extract_transcript::ExtractTranscript;
+use crate::jobs::{JobContext, JOB_CONTEXT};
+use anyhow::{anyhow, bail};
+use fang::async_trait;
+use fang::asynk::async_queue::AsyncQueueable;
+use fang::serde::{Deserialize, Serialize};
+use fang::{AsyncRunnable, FangError};
+use lazy_static::lazy_static;
+use sea_orm::ActiveValue::Set;
 use sea_orm::ColumnTrait;
+use sea_orm::{ActiveModelTrait, EntityTrait, QueryFilter, QuerySelect};
+use serde_json::Value;
+use std::fmt::Debug;
+use std::fs::File;
+use tempfile::TempDir;
+use tokio::process::Command;
 
 lazy_static! {
-    static ref REEL_REGEX: regex::Regex = regex::Regex::new(r"https://www.instagram.com/reel/([a-zA-Z0-9_-]+)(?:/.+)?").expect("Failed to compile regex");
+    static ref REEL_REGEX: regex::Regex =
+        regex::Regex::new(r"https://www.instagram.com/reel/([a-zA-Z0-9_-]+)(?:/.+)?")
+            .expect("Failed to compile regex");
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,13 +32,16 @@ pub(crate) struct FetchReelJob {
 
 impl FetchReelJob {
     pub fn new(reel_url: String) -> anyhow::Result<Self> {
-        let captures = REEL_REGEX.captures(&reel_url).ok_or(anyhow!("Invalid URL"))?;
-        let reel_id = captures.get(1).ok_or(anyhow!("Invalid URL"))?.as_str().to_string();
+        let captures = REEL_REGEX
+            .captures(&reel_url)
+            .ok_or(anyhow!("Invalid URL"))?;
+        let reel_id = captures
+            .get(1)
+            .ok_or(anyhow!("Invalid URL"))?
+            .as_str()
+            .to_string();
 
-        Ok(Self {
-            reel_url,
-            reel_id,
-        })
+        Ok(Self { reel_url, reel_id })
     }
 
     pub async fn exec(&self, context: &JobContext) -> anyhow::Result<Option<Model>> {
@@ -74,7 +79,8 @@ impl FetchReelJob {
             );
         }
 
-        let info: Value = serde_json::from_reader(File::open(&temp_dir.path().join("reel.info.json"))?)?;
+        let info: Value =
+            serde_json::from_reader(File::open(&temp_dir.path().join("reel.info.json"))?)?;
         let video_path = temp_dir.path().join("reel.mp4");
 
         std::fs::rename(
@@ -90,7 +96,9 @@ impl FetchReelJob {
             info: Set(info),
 
             ..Default::default()
-        }.insert(&context.db).await?;
+        }
+        .insert(&context.db)
+        .await?;
 
         tracing::info!("Added as video id: {}", video.id);
 
@@ -103,20 +111,23 @@ impl FetchReelJob {
 impl AsyncRunnable for FetchReelJob {
     #[tracing::instrument(skip(queue))]
     async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
-        let context = JOB_CONTEXT.get()
-            .ok_or(FangError { description: "Failed to read context".to_string() })?;
+        let context = JOB_CONTEXT.get().ok_or(FangError {
+            description: "Failed to read context".to_string(),
+        })?;
 
-        let new_video = self.exec(context).await
-            .map_err(|e| {
-                tracing::error!("{e:?}");
-                FangError { description: e.to_string() }
-            })?;
+        let new_video = self.exec(context).await.map_err(|e| {
+            tracing::error!("{e:?}");
+            FangError {
+                description: e.to_string(),
+            }
+        })?;
 
         if let Some(video) = new_video {
             tracing::info!("Running transcript extraction job");
-            queue.insert_task(&ExtractTranscript {
-                video_id: video.id,
-            }).await.unwrap();
+            queue
+                .insert_task(&ExtractTranscript { video_id: video.id })
+                .await
+                .unwrap();
         }
 
         Ok(())
