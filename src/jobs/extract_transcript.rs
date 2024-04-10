@@ -76,13 +76,11 @@ pub struct ExtractTranscriptJob {
 
 impl ExtractTranscriptJob {
     pub async fn new(video_id: i32, db: &DatabaseConnection) -> anyhow::Result<Self> {
-        let (reel_id, ) = crate::entities::instagram_video::Entity::find()
+        let (reel_id,) = crate::entities::instagram_video::Entity::find()
             .select_only()
-            .columns([
-                crate::entities::instagram_video::Column::InstagramId,
-            ])
+            .columns([crate::entities::instagram_video::Column::InstagramId])
             .filter(crate::entities::instagram_video::Column::Id.eq(video_id))
-            .into_tuple::<(String, )>()
+            .into_tuple::<(String,)>()
             .one(db)
             .await?
             .ok_or(anyhow::anyhow!("Video not found"))?;
@@ -101,8 +99,8 @@ impl ExtractTranscriptJob {
                 ..Default::default()
             },
         )
-            .exec(&context.db)
-            .await?;
+        .exec(&context.db)
+        .await?;
 
         Ok(())
     }
@@ -136,5 +134,3 @@ impl AsyncRunnable for ExtractTranscriptJob {
         60 * u32::pow(2, attempt)
     }
 }
-
-

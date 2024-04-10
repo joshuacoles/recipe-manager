@@ -24,6 +24,7 @@ use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
 use axum_template::{engine::Engine, RenderHtml};
+use jobs::extract_transcript::ExtractTranscriptJob;
 use minijinja::{path_loader, Environment};
 use minijinja_autoreload::AutoReloader;
 use notify::Watcher;
@@ -34,7 +35,6 @@ use sea_orm::{
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use tower_livereload::LiveReloadLayer;
-use jobs::extract_transcript::ExtractTranscriptJob;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -95,8 +95,7 @@ async fn main() -> Result<(), anyhow::Error> {
         // `GET /recipes/:id`
         .show(show_recipe);
 
-    let videos = Resource::named("videos")
-        .show(get_video);
+    let videos = Resource::named("videos").show(get_video);
 
     let livereload = LiveReloadLayer::new();
     let reloader = livereload.reloader();
@@ -145,7 +144,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn transcribe_video(
-    Path((id, )): Path<(u32, )>,
+    Path((id,)): Path<(u32,)>,
     Extension(mut jobs): Extension<FangQueue>,
     Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
@@ -172,15 +171,15 @@ async fn recipes_index(
 ) -> impl IntoResponse {
     match header_map.get(ACCEPT) {
         Some(hv)
-        if hv
-            .to_str()
-            .map(|hv| hv == "application/json")
-            .unwrap_or(false) =>
-            {
-                let recipes = entities::recipes::Entity::find().all(&db).await.unwrap();
+            if hv
+                .to_str()
+                .map(|hv| hv == "application/json")
+                .unwrap_or(false) =>
+        {
+            let recipes = entities::recipes::Entity::find().all(&db).await.unwrap();
 
-                Json(recipes).into_response()
-            }
+            Json(recipes).into_response()
+        }
 
         _ => {
             let recipes = entities::recipes::Entity::find()
@@ -200,16 +199,20 @@ async fn recipes_index(
 }
 
 async fn load_nested_recipe(recipe_id: i32, db: &DatabaseConnection) -> anyhow::Result<Value> {
-    let recipe = db.query_one(Statement::from_sql_and_values(
-        Postgres,
-        r#"
+    let recipe = db
+        .query_one(Statement::from_sql_and_values(
+            Postgres,
+            r#"
         select to_jsonb(r) || jsonb_build_object('instagram_video', to_jsonb(iv)) as json
 from recipes r
          left join public.instagram_video iv on iv.id = r.instagram_video_id
 where r.id = $1;
         "#,
-        vec![recipe_id.into()],
-    )).await?.ok_or(anyhow!("Unknown recipe id"))?.try_get_by::<Value, _>("json")?;
+            vec![recipe_id.into()],
+        ))
+        .await?
+        .ok_or(anyhow!("Unknown recipe id"))?
+        .try_get_by::<Value, _>("json")?;
 
     Ok(recipe)
 }
@@ -218,19 +221,19 @@ async fn show_recipe(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
-    Path((recipe_id, )): Path<(u32, )>,
+    Path((recipe_id,)): Path<(u32,)>,
 ) -> impl IntoResponse {
     let recipe = load_nested_recipe(recipe_id as i32, &db).await.unwrap();
 
     match header_map.get(ACCEPT) {
         Some(hv)
-        if hv
-            .to_str()
-            .map(|hv| hv == "application/json")
-            .unwrap_or(false) =>
-            {
-                Json(recipe).into_response()
-            }
+            if hv
+                .to_str()
+                .map(|hv| hv == "application/json")
+                .unwrap_or(false) =>
+        {
+            Json(recipe).into_response()
+        }
         _ => RenderHtml("recipe.html", template_engine, recipe).into_response(),
     }
 }
@@ -260,9 +263,9 @@ impl<T> FormOrJson<T> {
 
 #[async_trait]
 impl<T, S> FromRequest<S> for FormOrJson<T>
-    where
-        T: DeserializeOwned,
-        S: Send + Sync,
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
 {
     type Rejection = Response;
 
@@ -300,7 +303,7 @@ async fn create_recipe_from_reel(
 async fn get_video(
     Extension(context): Extension<JobContext>,
     headers: HeaderMap,
-    Path((instagram_id, )): Path<(String, )>,
+    Path((instagram_id,)): Path<(String,)>,
 ) -> impl IntoResponse {
     let video_path = context.video_path(&instagram_id);
 

@@ -53,7 +53,7 @@ impl FetchReelJob {
             .filter(instagram_video::Column::InstagramId.eq(&self.reel_id))
             .select_only()
             .column(instagram_video::Column::Id)
-            .into_tuple::<(i32, )>()
+            .into_tuple::<(i32,)>()
             .one(&context.db)
             .await?;
 
@@ -64,10 +64,7 @@ impl FetchReelJob {
 
         let (info, video_path) = self.download_reel(&context).await?;
 
-        let transcript = ExtractTranscript::extract_transcript(
-            &context,
-            &video_path
-        ).await?;
+        let transcript = ExtractTranscript::extract_transcript(&context, &video_path).await?;
 
         tracing::info!("Adding to instagram_video");
 
@@ -79,8 +76,8 @@ impl FetchReelJob {
 
             ..Default::default()
         }
-            .insert(&context.db)
-            .await?;
+        .insert(&context.db)
+        .await?;
 
         tracing::info!("Added as video id: {}", video.id);
 
@@ -113,10 +110,7 @@ impl FetchReelJob {
         let temp_video_path = temp_dir.path().join("reel.mp4");
         let video_path = context.video_path(&self.reel_id);
 
-        std::fs::rename(
-            temp_video_path,
-            &video_path,
-        )?;
+        std::fs::rename(temp_video_path, &video_path)?;
         Ok((info, video_path))
     }
 }
