@@ -17,8 +17,10 @@ pub struct JobContext {
     pub yt_dlp_command_string: OsString,
     pub reel_dir: PathBuf,
     pub openai_client: Client<OpenAIConfig>,
-    pub openai_direct_client: Client<OpenAIConfig>,
     pub model: String,
+
+    pub whisper_url: String,
+    pub whisper_key: String,
 }
 
 impl JobContext {
@@ -28,7 +30,8 @@ impl JobContext {
         p1: &Option<PathBuf>,
         p2: PathBuf,
         p3: Client<OpenAIConfig>,
-        p4: Client<OpenAIConfig>,
+        p4: String,
+        p5: String,
         model: String,
     ) -> JobContext {
         JobContext {
@@ -37,7 +40,9 @@ impl JobContext {
             yt_dlp_command_string: p1.as_ref().map_or_else(|| "yt-dlp".into(), |p| p.into()),
             reel_dir: p2,
             openai_client: p3,
-            openai_direct_client: p4,
+
+            whisper_url: p4,
+            whisper_key: p5,
             model,
         }
     }

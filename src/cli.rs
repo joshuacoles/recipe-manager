@@ -57,6 +57,21 @@ pub struct Cli {
         default_value = "http://localhost:11434/v1"
     )]
     pub openai_base_url: String,
+
+
+    #[clap(
+        long = "whisper-url",
+        env = "RECIPE_WHISPER_URL",
+        default_value = "http://127.0.0.1:8080/inference"
+    )]
+    pub whisper_url: String,
+
+    #[clap(
+        long = "whisper-key",
+        env = "RECIPE_WHISPER_KEY",
+        default_value = "local"
+    )]
+    pub whisper_key: String,
 }
 
 impl Cli {

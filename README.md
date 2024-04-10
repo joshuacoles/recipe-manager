@@ -14,3 +14,9 @@ background jobs and HTMX for the frontend.
 
 - Whisper on the video audio for more clear instructions.
   - Include transcription as raw block as well as feed into the LLM.
+
+## Todo Before Deployment
+
+- Fix model calling
+- Allow for whisper.cpp
+  - Probably want to make a service running on `beachhead` for this

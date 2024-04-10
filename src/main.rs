@@ -64,12 +64,8 @@ async fn main() -> anyhow::Result<()> {
         &cli.yt_dlp_path,
         cli.reel_dir.clone(),
         cli.openai_client()?,
-        {
-            let config =
-                async_openai::config::OpenAIConfig::new().with_api_key(&cli.direct_openai_api_key);
-
-            async_openai::Client::with_config(config)
-        },
+        cli.whisper_url.clone(),
+        cli.whisper_key.clone(),
         cli.openai_model,
     );
 

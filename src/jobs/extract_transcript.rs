@@ -1,14 +1,35 @@
+use std::collections::HashMap;
 use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::bail;
-use async_openai::types::{
-    AudioInput, AudioResponseFormat, CreateTranscriptionRequest,
-    CreateTranscriptionResponseVerboseJson, InputSource, TimestampGranularity,
-};
 use async_trait::async_trait;
 use fang::{AsyncQueueable, AsyncRunnable, Deserialize, FangError, Serialize};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set};
 use std::path::{Path, PathBuf};
+use serde_json::Value;
 use tokio::process::Command;
+use reqwest::{multipart, Body, Client};
+use tokio::fs::File;
+use tokio_util::codec::{BytesCodec, FramedRead};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Transcript {
+    text: String,
+    segments: Vec<Segment>,
+
+    #[serde(flatten)]
+    other: HashMap<String, Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Segment {
+    id: i32,
+    start: f64,
+    end: f64,
+    text: String,
+
+    #[serde(flatten)]
+    other: HashMap<String, Value>,
+}
 
 pub struct ExtractTranscript;
 
@@ -17,32 +38,41 @@ impl ExtractTranscript {
     pub async fn extract_transcript(
         context: &JobContext,
         video_path: &Path,
-    ) -> anyhow::Result<CreateTranscriptionResponseVerboseJson> {
+    ) -> anyhow::Result<Transcript> {
         tracing::info!("Extracting transcript");
         let audio_path = Self::extract_audio(&video_path).await?;
 
-        // Does this work on ollama?
-        // Answer: no
-        let output = context
-            .openai_direct_client
-            .audio()
-            .transcribe_verbose_json(CreateTranscriptionRequest {
-                model: "whisper-1".to_string(),
-                response_format: Some(AudioResponseFormat::VerboseJson),
-                language: Some("en".to_string()),
-                file: AudioInput {
-                    source: InputSource::Path { path: audio_path },
-                },
-                timestamp_granularities: Some(vec![TimestampGranularity::Segment]),
-                ..Default::default()
-            })
+        let file = File::open(audio_path).await?;
+
+        // read file body stream
+        let stream = FramedRead::new(file, BytesCodec::new());
+        let file_body = Body::wrap_stream(stream);
+
+        //make form part of file
+        let some_file = multipart::Part::stream(file_body)
+            .file_name("audio.wav")
+            .mime_str("audio/wav")?;
+
+        let output = Client::new()
+            .post(&format!("{}", context.whisper_url))
+            .bearer_auth(&context.whisper_key)
+            .multipart(
+                multipart::Form::new()
+                    .text("model", "whisper-1")
+                    .text("response_format", "verbose_json")
+                    .text("language", "en")
+                    .part("file", some_file)
+            )
+            .send()
+            .await?
+            .json()
             .await?;
 
         Ok(output)
     }
 
     async fn extract_audio(video_path: &Path) -> anyhow::Result<PathBuf> {
-        let audio_path = video_path.with_extension("audio.mp3");
+        let audio_path = video_path.with_extension("audio.wav");
 
         if audio_path.exists() {
             tracing::info!("Audio already extracted");
@@ -52,6 +82,7 @@ impl ExtractTranscript {
         let output = Command::new("ffmpeg")
             .arg("-i")
             .arg(video_path)
+            .args(&["-vn", "-ar", "16000", "-ac", "2", "-ab", "320k"])
             .arg(&audio_path)
             .output()
             .await?;
@@ -76,11 +107,11 @@ pub struct ExtractTranscriptJob {
 
 impl ExtractTranscriptJob {
     pub async fn new(video_id: i32, db: &DatabaseConnection) -> anyhow::Result<Self> {
-        let (reel_id,) = crate::entities::instagram_video::Entity::find()
+        let (reel_id, ) = crate::entities::instagram_video::Entity::find()
             .select_only()
             .columns([crate::entities::instagram_video::Column::InstagramId])
             .filter(crate::entities::instagram_video::Column::Id.eq(video_id))
-            .into_tuple::<(String,)>()
+            .into_tuple::<(String, )>()
             .one(db)
             .await?
             .ok_or(anyhow::anyhow!("Video not found"))?;
@@ -99,8 +130,8 @@ impl ExtractTranscriptJob {
                 ..Default::default()
             },
         )
-        .exec(&context.db)
-        .await?;
+            .exec(&context.db)
+            .await?;
 
         Ok(())
     }

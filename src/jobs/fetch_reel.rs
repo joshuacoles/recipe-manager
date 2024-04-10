@@ -86,6 +86,16 @@ impl FetchReelJob {
 
     async fn download_reel(&self, context: &&JobContext) -> anyhow::Result<(Value, PathBuf)> {
         tracing::info!("Downloading reel");
+
+        let video_path = context.video_path(&self.reel_id);
+        let json_path = video_path.with_extension("json");
+
+        if video_path.exists() && json_path.exists() {
+            tracing::info!("Reel already downloaded");
+            let info: Value = serde_json::from_reader(File::open(&json_path)?)?;
+            return Ok((info, video_path));
+        }
+
         let temp_dir = TempDir::new()?;
 
         let yt_dlp_output = Command::new(&context.yt_dlp_command_string)
@@ -104,13 +114,13 @@ impl FetchReelJob {
             );
         }
 
-        let info: Value =
-            serde_json::from_reader(File::open(&temp_dir.path().join("reel.info.json"))?)?;
-
+        let temp_json = &temp_dir.path().join("reel.info.json");
         let temp_video_path = temp_dir.path().join("reel.mp4");
-        let video_path = context.video_path(&self.reel_id);
 
         std::fs::rename(temp_video_path, &video_path)?;
+        std::fs::rename(temp_json, &json_path)?;
+
+        let info: Value = serde_json::from_reader(File::open(&json_path)?)?;
         Ok((info, video_path))
     }
 }
