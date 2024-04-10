@@ -41,15 +41,10 @@ impl ExtractTranscript {
     ) -> anyhow::Result<Transcript> {
         tracing::info!("Extracting transcript");
         let audio_path = Self::extract_audio(&video_path).await?;
-
-        let file = File::open(audio_path).await?;
-
-        // read file body stream
-        let stream = FramedRead::new(file, BytesCodec::new());
-        let file_body = Body::wrap_stream(stream);
-
-        //make form part of file
-        let some_file = multipart::Part::stream(file_body)
+        let audio_file = File::open(audio_path).await?;
+        let audio = FramedRead::new(audio_file, BytesCodec::new());
+        let audio = Body::wrap_stream(audio);
+        let audio = multipart::Part::stream(audio)
             .file_name("audio.wav")
             .mime_str("audio/wav")?;
 
@@ -61,7 +56,7 @@ impl ExtractTranscript {
                     .text("model", "whisper-1")
                     .text("response_format", "verbose_json")
                     .text("language", "en")
-                    .part("file", some_file)
+                    .part("file", audio)
             )
             .send()
             .await?
