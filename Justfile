@@ -12,3 +12,7 @@ generate-entities:
 
 migrate:
     sqlx migrate run --database-url postgres://postgres@localhost/recipes
+    cargo sqlx prepare --database-url postgres://postgres@localhost/recipes
+
+sqlx-prep:
+    cargo sqlx prepare --database-url postgres://postgres@localhost/recipes
