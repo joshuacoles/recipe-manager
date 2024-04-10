@@ -144,7 +144,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn transcribe_video(
-    Path((id,)): Path<(u32,)>,
+    Path((id, )): Path<(u32, )>,
     Extension(mut jobs): Extension<FangQueue>,
     Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
@@ -170,12 +170,7 @@ async fn recipes_index(
     Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
     match header_map.get(ACCEPT) {
-        Some(hv)
-            if hv
-                .to_str()
-                .map(|hv| hv == "application/json")
-                .unwrap_or(false) =>
-        {
+        Some(hv) if is_json(hv) => {
             let recipes = entities::recipes::Entity::find().all(&db).await.unwrap();
 
             Json(recipes).into_response()
@@ -221,21 +216,21 @@ async fn show_recipe(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
-    Path((recipe_id,)): Path<(u32,)>,
+    Path((recipe_id, )): Path<(u32, )>,
 ) -> impl IntoResponse {
     let recipe = load_nested_recipe(recipe_id as i32, &db).await.unwrap();
 
     match header_map.get(ACCEPT) {
-        Some(hv)
-            if hv
-                .to_str()
-                .map(|hv| hv == "application/json")
-                .unwrap_or(false) =>
-        {
-            Json(recipe).into_response()
-        }
+        Some(hv) if is_json(hv) => Json(recipe).into_response(),
         _ => RenderHtml("recipe.html", template_engine, recipe).into_response(),
     }
+}
+
+fn is_json(hv: &HeaderValue) -> bool {
+    hv
+        .to_str()
+        .map(|hv| hv == "application/json")
+        .unwrap_or(false)
 }
 
 async fn shutdown_signal() {
@@ -263,9 +258,9 @@ impl<T> FormOrJson<T> {
 
 #[async_trait]
 impl<T, S> FromRequest<S> for FormOrJson<T>
-where
-    T: DeserializeOwned,
-    S: Send + Sync,
+    where
+        T: DeserializeOwned,
+        S: Send + Sync,
 {
     type Rejection = Response;
 
@@ -303,7 +298,7 @@ async fn create_recipe_from_reel(
 async fn get_video(
     Extension(context): Extension<JobContext>,
     headers: HeaderMap,
-    Path((instagram_id,)): Path<(String,)>,
+    Path((instagram_id, )): Path<(String, )>,
 ) -> impl IntoResponse {
     let video_path = context.video_path(&instagram_id);
 
