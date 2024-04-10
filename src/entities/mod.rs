@@ -4,4 +4,3 @@ pub mod prelude;
 
 pub mod instagram_video;
 pub mod recipes;
-pub mod transcript;

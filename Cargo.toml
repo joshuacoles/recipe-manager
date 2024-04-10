@@ -29,7 +29,7 @@ chrono = { version = "0.4.37", features = ["serde"] }
 minijinja = { version = "1.0.16", features = ["loader"] }
 axum-template = { version = "2.2.0", features = ["minijinja-autoreload", "minijinja"] }
 minijinja-autoreload = "1.0.16"
-axum-extra = "0.9.3"
+axum-extra = { version = "0.9.3", features = ["default", "typed-header"] }
 whisper-rs = { version = "0.11.1", features = ["metal", "coreml"] }
 sea-orm = { version = "0.12", features = [
     "sqlx-postgres",

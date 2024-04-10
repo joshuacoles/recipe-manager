@@ -6,23 +6,20 @@ use async_openai::types::{
 };
 use async_trait::async_trait;
 use fang::{AsyncQueueable, AsyncRunnable, Deserialize, FangError, Serialize};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, NotSet, QueryFilter, QuerySelect, Set};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(crate = "fang::serde")]
-pub struct ExtractTranscript {
-    pub(crate) video_id: i32,
-}
+pub struct ExtractTranscript;
 
 impl ExtractTranscript {
-    async fn extract_transcript(
-        &self,
-        video_path: &Path,
+    #[tracing::instrument(skip(context))]
+    pub async fn extract_transcript(
         context: &JobContext,
+        video_path: &Path,
     ) -> anyhow::Result<CreateTranscriptionResponseVerboseJson> {
-        let audio_path = self.extract_audio(&video_path).await?;
+        tracing::info!("Extracting transcript");
+        let audio_path = Self::extract_audio(&video_path).await?;
 
         // Does this work on ollama?
         // Answer: no
@@ -44,7 +41,7 @@ impl ExtractTranscript {
         Ok(output)
     }
 
-    async fn extract_audio(&self, video_path: &Path) -> anyhow::Result<PathBuf> {
+    async fn extract_audio(video_path: &Path) -> anyhow::Result<PathBuf> {
         let audio_path = video_path.with_extension("audio.mp3");
 
         if audio_path.exists() {
@@ -68,59 +65,44 @@ impl ExtractTranscript {
 
         Ok(audio_path)
     }
+}
 
-    pub async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
-        let (reel_id, existing_transcript) = crate::entities::instagram_video::Entity::find()
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(crate = "fang::serde")]
+pub struct ExtractTranscriptJob {
+    pub video_id: i32,
+    pub reel_id: String,
+}
+
+impl ExtractTranscriptJob {
+    pub async fn new(video_id: i32, db: &DatabaseConnection) -> anyhow::Result<Self> {
+        let (reel_id, ) = crate::entities::instagram_video::Entity::find()
             .select_only()
             .columns([
                 crate::entities::instagram_video::Column::InstagramId,
-                crate::entities::instagram_video::Column::TranscriptId,
             ])
-            .filter(crate::entities::instagram_video::Column::Id.eq(self.video_id))
-            .into_tuple::<(String, Option<i32>)>()
-            .one(&context.db)
+            .filter(crate::entities::instagram_video::Column::Id.eq(video_id))
+            .into_tuple::<(String, )>()
+            .one(db)
             .await?
             .ok_or(anyhow::anyhow!("Video not found"))?;
 
-        // Remove existing transcript if it exists
-        if let Some(existing_transcript) = existing_transcript {
-            tracing::info!("Removing existing transcript");
+        Ok(Self { video_id, reel_id })
+    }
 
-            crate::entities::instagram_video::Entity::update(
-                crate::entities::instagram_video::ActiveModel {
-                    id: Set(self.video_id),
-                    transcript_id: Set(None),
-                    ..Default::default()
-                },
-            )
-            .exec(&context.db)
-            .await?;
-
-            crate::entities::transcript::Entity::delete_by_id(existing_transcript)
-                .exec(&context.db)
-                .await?;
-        }
-
-        let video_path = context.video_path(&reel_id);
-        let transcript = self.extract_transcript(&video_path, context).await?;
-
-        let v = crate::entities::transcript::ActiveModel {
-            id: NotSet,
-            content: Set(transcript.text.clone()),
-            json: Set(Some(serde_json::to_value(transcript)?)),
-        }
-        .save(&context.db)
-        .await?;
+    async fn exec(&self, context: &JobContext) -> anyhow::Result<()> {
+        let video_path = context.video_path(&self.reel_id);
+        let transcript = ExtractTranscript::extract_transcript(context, &video_path).await?;
 
         crate::entities::instagram_video::Entity::update(
             crate::entities::instagram_video::ActiveModel {
                 id: Set(self.video_id),
-                transcript_id: Set(Some(v.id.unwrap())),
+                transcript: Set(Some(serde_json::to_value(transcript).unwrap())),
                 ..Default::default()
             },
         )
-        .exec(&context.db)
-        .await?;
+            .exec(&context.db)
+            .await?;
 
         Ok(())
     }
@@ -128,9 +110,9 @@ impl ExtractTranscript {
 
 #[typetag::serde]
 #[async_trait]
-impl AsyncRunnable for ExtractTranscript {
-    #[tracing::instrument(skip(queue))]
-    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+impl AsyncRunnable for ExtractTranscriptJob {
+    #[tracing::instrument(skip(_queue))]
+    async fn run(&self, _queue: &mut dyn AsyncQueueable) -> Result<(), FangError> {
         let context = JOB_CONTEXT.get().ok_or(FangError {
             description: "Failed to read context".to_string(),
         })?;
@@ -138,12 +120,6 @@ impl AsyncRunnable for ExtractTranscript {
         self.exec(context).await.map_err(|e| FangError {
             description: e.to_string(),
         })?;
-
-        queue
-            .insert_task(&crate::jobs::llm_extract_details::LLmExtractDetailsJob {
-                video_id: self.video_id,
-            })
-            .await?;
 
         Ok(())
     }
@@ -160,3 +136,5 @@ impl AsyncRunnable for ExtractTranscript {
         60 * u32::pow(2, attempt)
     }
 }
+
+

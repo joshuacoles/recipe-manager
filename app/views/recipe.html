@@ -46,7 +46,6 @@
                 {% if instagram_video.transcript %}
                     <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
                         <summary class="text-blue-500 cursor-pointer">Transcript</summary>
-                        {% if instagram_video.transcript.json %}
                         <ul class="flex flex-col gap-2 p-4 text-lg">
                             {% for segment in instagram_video.transcript.json.segments %}
                                 <li class="mb-2">
@@ -54,9 +53,6 @@
                                 </li>
                             {% endfor %}
                         </ul>
-                        {% else %}
-                            <pre class="p-4 w-full text-wrap font-sans">{{ instagram_video.transcript.text }}</pre>
-                        {% endif %}
                     </details>
                 {% endif %}
             </div>

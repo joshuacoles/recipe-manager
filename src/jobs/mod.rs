@@ -42,8 +42,8 @@ impl JobContext {
         }
     }
 
-    pub fn video_path(&self, video_id: &str) -> PathBuf {
-        self.reel_dir.join(format!("{}.mp4", video_id))
+    pub fn video_path(&self, reel_id: &str) -> PathBuf {
+        self.reel_dir.join(&reel_id).with_extension("mp4")
     }
 }
 

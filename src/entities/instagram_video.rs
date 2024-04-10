@@ -16,32 +16,19 @@ pub struct Model {
     pub info: Json,
     pub created_at: Option<DateTime>,
     pub updated_at: Option<DateTime>,
-    pub transcript_id: Option<i32>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub transcript: Option<Json>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::recipes::Entity")]
     Recipes,
-    #[sea_orm(
-        belongs_to = "super::transcript::Entity",
-        from = "Column::TranscriptId",
-        to = "super::transcript::Column::Id",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Transcript,
 }
 
 impl Related<super::recipes::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Recipes.def()
-    }
-}
-
-impl Related<super::transcript::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Transcript.def()
     }
 }
 

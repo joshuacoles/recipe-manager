@@ -2,4 +2,3 @@
 
 pub use super::instagram_video::Entity as InstagramVideo;
 pub use super::recipes::Entity as Recipes;
-pub use super::transcript::Entity as Transcript;

@@ -76,14 +76,15 @@ impl LLmExtractDetailsJob {
         let client = &context.openai_client;
         let llm_model = &context.model;
 
-        let transcript = match instagram_video.transcript_id {
-            Some(transcript_id) => {
-                crate::entities::transcript::Entity::find_by_id(transcript_id)
-                    .one(&context.db)
-                    .await?
-                    .ok_or(anyhow!("Invalid transcript id"))?
-                    .content
+        let transcript = match &instagram_video.transcript {
+            Some(transcript) => {
+                transcript.get("text")
+                    .ok_or(anyhow!("No text in transcript"))?
+                    .as_str()
+                    .expect("Failed to convert transcript to string")
+                    .to_string()
             }
+
             None => String::new(),
         };
 
@@ -157,8 +158,8 @@ impl LLmExtractDetailsJob {
                 ..Default::default()
             }
         }))
-        .exec(db)
-        .await?;
+            .exec(db)
+            .await?;
 
         Ok(())
     }
