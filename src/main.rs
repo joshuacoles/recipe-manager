@@ -1,6 +1,7 @@
 mod cli;
 mod entities;
 mod jobs;
+mod error;
 
 use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::anyhow;
@@ -39,7 +40,7 @@ use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
 type FangQueue = AsyncQueue<NoTls>;
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     cli.validate_reel_dir()?;
@@ -148,27 +149,27 @@ async fn transcribe_video(
     Path((id, )): Path<(u32, )>,
     Extension(mut jobs): Extension<FangQueue>,
     Extension(db): Extension<DatabaseConnection>,
-) -> impl IntoResponse {
+) -> error::Result<impl IntoResponse> {
     return match ExtractTranscriptJob::new(id as i32, &db).await {
         Ok(job) => {
-            jobs.insert_task(&job).await.unwrap();
-            StatusCode::CREATED.into_response()
+            jobs.insert_task(&job).await?;
+            Ok(StatusCode::CREATED.into_response())
         }
 
-        Err(_) => (StatusCode::BAD_REQUEST, "Invalid video id").into_response(),
+        Err(_) => Ok((StatusCode::BAD_REQUEST, "Invalid video id").into_response()),
     };
 }
 
 async fn llm(
     Path((id, )): Path<(u32, )>,
     Extension(mut jobs): Extension<FangQueue>,
-) -> impl IntoResponse {
+) -> error::Result<impl IntoResponse> {
     let job = LLmExtractDetailsJob {
         video_id: id as i32,
     };
 
-    jobs.insert_task(&job).await.unwrap();
-    StatusCode::CREATED.into_response()
+    jobs.insert_task(&job).await?;
+    Ok(StatusCode::CREATED.into_response())
 }
 
 #[derive(Serialize, FromQueryResult)]
@@ -181,12 +182,12 @@ async fn recipes_index(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
-) -> impl IntoResponse {
+) -> error::Result<impl IntoResponse> {
     match header_map.get(ACCEPT) {
         Some(hv) if is_json(hv) => {
-            let recipes = entities::recipes::Entity::find().all(&db).await.unwrap();
+            let recipes = entities::recipes::Entity::find().all(&db).await?;
 
-            Json(recipes).into_response()
+            Ok(Json(recipes).into_response())
         }
 
         _ => {
@@ -198,10 +199,9 @@ async fn recipes_index(
                 ])
                 .into_model::<RecipeIdTitle>()
                 .all(&db)
-                .await
-                .unwrap();
+                .await?;
 
-            RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response()
+            Ok(RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response())
         }
     }
 }
@@ -231,7 +231,9 @@ async fn show_recipe(
     Extension(db): Extension<DatabaseConnection>,
     Path((recipe_id, )): Path<(u32, )>,
 ) -> impl IntoResponse {
-    let recipe = load_nested_recipe(recipe_id as i32, &db).await.unwrap();
+    let Ok(recipe) = load_nested_recipe(recipe_id as i32, &db).await else {
+        return (StatusCode::NOT_FOUND, "Recipe not found").into_response();
+    };
 
     tracing::info!("Displaying Recipe: {:#?}", recipe);
 
@@ -249,7 +251,7 @@ fn is_json(hv: &HeaderValue) -> bool {
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c().await.unwrap();
+    tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C handler");
 }
 
 #[derive(Deserialize, Debug)]
@@ -297,16 +299,16 @@ impl<T, S> FromRequest<S> for FormOrJson<T>
 async fn create_recipe_from_reel(
     Extension(mut queue): Extension<FangQueue>,
     request: FormOrJson<CreateRecipeFromReelRequest>,
-) -> impl IntoResponse {
+) -> error::Result<impl IntoResponse> {
     let request = request.into_inner();
 
     return match FetchReelJob::new(request.reel_url) {
         Ok(job) => {
-            queue.insert_task(&job).await.unwrap();
-            StatusCode::CREATED.into_response()
+            queue.insert_task(&job).await?;
+            Ok(StatusCode::CREATED.into_response())
         }
 
-        Err(_) => (StatusCode::BAD_REQUEST, "Invalid reel URL").into_response(),
+        Err(_) => Ok((StatusCode::BAD_REQUEST, "Invalid reel URL").into_response()),
     };
 }
 
@@ -314,10 +316,13 @@ async fn get_video(
     Extension(context): Extension<JobContext>,
     headers: HeaderMap,
     Path((instagram_id, )): Path<(String, )>,
-) -> impl IntoResponse {
+) -> error::Result<impl IntoResponse> {
     let video_path = context.video_path(&instagram_id);
 
     let mut req = Request::new(Body::empty());
     *req.headers_mut() = headers;
-    ServeFile::new(video_path).try_call(req).await.unwrap()
+    Ok(ServeFile::new(video_path).try_call(req)
+        .await
+        .map_err(|e| anyhow!(e))?
+    )
 }

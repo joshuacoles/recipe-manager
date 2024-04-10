@@ -2243,6 +2243,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tempfile",
+ "thiserror",
  "tokio",
  "tower-http",
  "tower-livereload",
