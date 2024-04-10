@@ -34,6 +34,7 @@ use sea_orm::{
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use tower_livereload::LiveReloadLayer;
+use jobs::extract_transcript::ExtractTranscriptJob;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -94,13 +95,16 @@ async fn main() -> Result<(), anyhow::Error> {
         // `GET /recipes/:id`
         .show(show_recipe);
 
+    let videos = Resource::named("videos")
+        .show(get_video);
+
     let livereload = LiveReloadLayer::new();
     let reloader = livereload.reloader();
 
     let app = Router::new()
         .merge(recipes)
-        .route("/recipes/:id/transcribe", post(transcribe_recipe))
-        .route("/videos/:instagram_id", get(get_video))
+        .merge(videos)
+        .route("/videos/:id/transcribe", post(transcribe_video))
         .nest_service("/public", ServeDir::new("./public"))
         .layer(Extension(seaorm.clone()))
         .layer(Extension(db.clone()))
@@ -140,19 +144,19 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-async fn transcribe_recipe(
+async fn transcribe_video(
     Path((id, )): Path<(u32, )>,
     Extension(mut jobs): Extension<FangQueue>,
     Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
-    let job = jobs::extract_transcript::ExtractTranscriptJob::new(
-        id as i32,
-        &db
-    ).await.unwrap();
+    return match ExtractTranscriptJob::new(id as i32, &db).await {
+        Ok(job) => {
+            jobs.insert_task(&job).await.unwrap();
+            StatusCode::CREATED.into_response()
+        }
 
-    jobs.insert_task(&job).await.unwrap();
-
-    StatusCode::CREATED
+        Err(_) => (StatusCode::BAD_REQUEST, "Invalid video id").into_response(),
+    };
 }
 
 #[derive(Serialize, FromQueryResult)]
