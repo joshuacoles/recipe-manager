@@ -11,8 +11,7 @@ use axum::extract::{FromRequest, Path, Request};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use axum::{routing::get, Extension, Form, Json, Router};
+use axum::{routing::post, Extension, Form, Json, Router};
 use axum_extra::routing::Resource;
 use clap::Parser;
 use cli::Cli;
@@ -35,6 +34,7 @@ use sea_orm::{
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use tower_livereload::LiveReloadLayer;
+use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -103,6 +103,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let app = Router::new()
         .merge(recipes)
         .merge(videos)
+        .route("/videos/:id/llm", post(llm))
         .route("/videos/:id/transcribe", post(transcribe_video))
         .nest_service("/public", ServeDir::new("./public"))
         .layer(Extension(seaorm.clone()))
@@ -156,6 +157,19 @@ async fn transcribe_video(
 
         Err(_) => (StatusCode::BAD_REQUEST, "Invalid video id").into_response(),
     };
+}
+
+async fn llm(
+    Path((id, )): Path<(u32, )>,
+    Extension(mut jobs): Extension<FangQueue>,
+    Extension(db): Extension<DatabaseConnection>,
+) -> impl IntoResponse {
+    let job = LLmExtractDetailsJob {
+        video_id: id as i32,
+    };
+
+    jobs.insert_task(&job).await.unwrap();
+    StatusCode::CREATED.into_response()
 }
 
 #[derive(Serialize, FromQueryResult)]
@@ -219,6 +233,8 @@ async fn show_recipe(
     Path((recipe_id, )): Path<(u32, )>,
 ) -> impl IntoResponse {
     let recipe = load_nested_recipe(recipe_id as i32, &db).await.unwrap();
+
+    tracing::info!("Displaying Recipe: {:#?}", recipe);
 
     match header_map.get(ACCEPT) {
         Some(hv) if is_json(hv) => Json(recipe).into_response(),

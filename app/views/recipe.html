@@ -47,7 +47,7 @@
                     <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
                         <summary class="text-blue-500 cursor-pointer">Transcript</summary>
                         <ul class="flex flex-col gap-2 p-4 text-lg">
-                            {% for segment in instagram_video.transcript.json.segments %}
+                            {% for segment in instagram_video.transcript.segments %}
                                 <li class="mb-2">
                                     {{ segment.text }}
                                 </li>
