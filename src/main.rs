@@ -11,8 +11,8 @@ use axum::extract::rejection::{FormRejection, JsonRejection};
 use axum::extract::{FromRequest, Path, Request};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::{routing::post, Extension, Form, Json, Router};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::{routing::{get, post}, Extension, Form, Json, Router};
 use axum_extra::routing::Resource;
 use clap::Parser;
 use cli::Cli;
@@ -104,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(recipes)
         .merge(videos)
+        .route("/", get(|| async { Redirect::to("/recipes") } ))
         .route("/videos/:id/llm", post(llm))
         .route("/videos/:id/transcribe", post(transcribe_video))
         .nest_service("/public", ServeDir::new("./public"))
@@ -201,7 +202,7 @@ async fn recipes_index(
                 .all(&db)
                 .await?;
 
-            Ok(RenderHtml("index.html", template_engine, json!({ "recipes": recipes })).into_response())
+            Ok(RenderHtml("recipes/index.html", template_engine, json!({ "recipes": recipes })).into_response())
         }
     }
 }
@@ -239,7 +240,7 @@ async fn show_recipe(
 
     match header_map.get(ACCEPT) {
         Some(hv) if is_json(hv) => Json(recipe).into_response(),
-        _ => RenderHtml("recipe.html", template_engine, recipe).into_response(),
+        _ => RenderHtml("recipes/show.html", template_engine, recipe).into_response(),
     }
 }
 
