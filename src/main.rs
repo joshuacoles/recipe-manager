@@ -162,7 +162,6 @@ async fn transcribe_video(
 async fn llm(
     Path((id, )): Path<(u32, )>,
     Extension(mut jobs): Extension<FangQueue>,
-    Extension(db): Extension<DatabaseConnection>,
 ) -> impl IntoResponse {
     let job = LLmExtractDetailsJob {
         video_id: id as i32,

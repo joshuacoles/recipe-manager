@@ -94,12 +94,26 @@ impl LLmExtractDetailsJob {
             .as_str()
             .ok_or(anyhow!("Description is not a string"))?;
 
-        let prompt = format!(
-            "{prompt}:\n{description}\n\n{transcript}",
-            prompt = include_str!("../../app/prompts/extract_recipe_details.txt"),
-            description = description,
-            transcript = transcript
-        );
+        let dynamic = true;
+
+        let prompt_template = if dynamic {
+            std::fs::read_to_string("app/prompts/extract_recipe_details.txt").unwrap()
+        } else {
+            include_str!("../../app/prompts/extract_recipe_details.txt").to_string()
+        };
+
+        let env = {
+            let mut env = minijinja::Environment::new();
+            env.add_template("prompt", &prompt_template).unwrap();
+            env
+        };
+
+        let template = env.get_template("prompt").unwrap();
+
+        let prompt = template.render(serde_json::json!({
+            "description": description,
+            "transcript": transcript,
+        })).unwrap();
 
         tracing::info!("Prompt prepared");
 
@@ -157,8 +171,8 @@ impl LLmExtractDetailsJob {
                 ..Default::default()
             }
         }))
-        .exec(db)
-        .await?;
+            .exec(db)
+            .await?;
 
         Ok(())
     }
