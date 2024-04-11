@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::entities::instagram_video;
 use crate::entities::instagram_video::Model;
 use crate::jobs::extract_transcript::ExtractTranscript;
@@ -9,7 +10,7 @@ use fang::serde::{Deserialize, Serialize};
 use fang::{AsyncRunnable, FangError};
 use lazy_static::lazy_static;
 use sea_orm::ActiveValue::Set;
-use sea_orm::ColumnTrait;
+use sea_orm::{ColumnTrait, FromJsonQueryResult};
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde_json::Value;
 use std::fmt::Debug;
@@ -29,6 +30,14 @@ lazy_static! {
 pub(crate) struct FetchReelJob {
     pub(crate) reel_url: String,
     pub(crate) reel_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
+pub struct ReelInfo {
+    pub description: String,
+
+    #[serde(flatten)]
+    rest: HashMap<String, Value>
 }
 
 impl FetchReelJob {
@@ -72,7 +81,7 @@ impl FetchReelJob {
             instagram_id: Set(self.reel_id.clone()),
             video_url: Set(self.reel_url.clone()),
             info: Set(info),
-            transcript: Set(Some(serde_json::to_value(transcript)?)),
+            transcript: Set(Some(transcript)),
 
             ..Default::default()
         }
@@ -84,7 +93,7 @@ impl FetchReelJob {
         Ok(Some(video))
     }
 
-    async fn download_reel(&self, context: &&JobContext) -> anyhow::Result<(Value, PathBuf)> {
+    async fn download_reel(&self, context: &&JobContext) -> anyhow::Result<(ReelInfo, PathBuf)> {
         tracing::info!("Downloading reel");
 
         let video_path = context.video_path(&self.reel_id);
@@ -92,7 +101,7 @@ impl FetchReelJob {
 
         if video_path.exists() && json_path.exists() {
             tracing::info!("Reel already downloaded");
-            let info: Value = serde_json::from_reader(File::open(&json_path)?)?;
+            let info: ReelInfo = serde_json::from_reader(File::open(&json_path)?)?;
             return Ok((info, video_path));
         }
 
@@ -120,7 +129,7 @@ impl FetchReelJob {
         std::fs::rename(temp_video_path, &video_path)?;
         std::fs::rename(temp_json, &json_path)?;
 
-        let info: Value = serde_json::from_reader(File::open(&json_path)?)?;
+        let info: ReelInfo = serde_json::from_reader(File::open(&json_path)?)?;
         Ok((info, video_path))
     }
 }

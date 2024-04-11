@@ -15,6 +15,7 @@ use fang::{AsyncRunnable, FangError};
 use sea_orm::ColumnTrait;
 use sea_orm::QueryFilter;
 use sea_orm::{DatabaseConnection, EntityTrait, Set};
+use crate::jobs::extract_transcript::Transcript;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
@@ -34,6 +35,12 @@ struct ExtractedRecipe {
 enum AcceptableResponses {
     Array(Vec<ExtractedRecipe>),
     Object { recipes: Vec<ExtractedRecipe> },
+}
+
+enum LlmMethod {
+    PromptBased,
+    OllamaJsonMode,
+    FunctionCalling,
 }
 
 impl AcceptableResponses {
@@ -77,22 +84,14 @@ impl LLmExtractDetailsJob {
         let llm_model = &context.model;
 
         let transcript = match &instagram_video.transcript {
-            Some(transcript) => transcript
-                .get("text")
-                .ok_or(anyhow!("No text in transcript"))?
-                .as_str()
-                .expect("Failed to convert transcript to string")
-                .to_string(),
-
-            None => String::new(),
+            Some(transcript) => &transcript.text,
+            None => "",
         };
 
         let description = instagram_video
             .info
-            .get("description")
-            .ok_or(anyhow!("No description in video"))?
-            .as_str()
-            .ok_or(anyhow!("Description is not a string"))?;
+            .description
+            .as_str();
 
         let dynamic = true;
 

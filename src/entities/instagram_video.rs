@@ -2,6 +2,8 @@
 
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use crate::jobs::extract_transcript::Transcript;
+use crate::jobs::fetch_reel::ReelInfo;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "instagram_video")]
@@ -13,11 +15,11 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub video_url: String,
     #[sea_orm(column_type = "JsonBinary")]
-    pub info: Json,
+    pub info: ReelInfo,
     pub created_at: Option<DateTime>,
     pub updated_at: Option<DateTime>,
     #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub transcript: Option<Json>,
+    pub transcript: Option<Transcript>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

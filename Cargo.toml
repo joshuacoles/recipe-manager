@@ -44,3 +44,4 @@ thiserror = "1.0.58"
 reqwest = "0.12.3"
 async-convert = "1.0.0"
 tokio-util = "0.7.10"
+ordered-float = { version = "4.2.0", features = ["serde"] }

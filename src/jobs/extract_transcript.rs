@@ -3,28 +3,29 @@ use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::bail;
 use async_trait::async_trait;
 use fang::{AsyncQueueable, AsyncRunnable, Deserialize, FangError, Serialize};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, Set};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, FromJsonQueryResult, QueryFilter, QuerySelect, Set};
 use std::path::{Path, PathBuf};
+use ordered_float::OrderedFloat;
 use serde_json::Value;
 use tokio::process::Command;
 use reqwest::{multipart, Body, Client};
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
 pub struct Transcript {
-    text: String,
-    segments: Vec<Segment>,
+    pub text: String,
+    pub segments: Vec<Segment>,
 
     #[serde(flatten)]
-    other: HashMap<String, Value>,
+    pub other: HashMap<String, Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
 struct Segment {
     id: i32,
-    start: f64,
-    end: f64,
+    start: OrderedFloat<f64>,
+    end: OrderedFloat<f64>,
     text: String,
 
     #[serde(flatten)]
@@ -121,7 +122,7 @@ impl ExtractTranscriptJob {
         crate::entities::instagram_video::Entity::update(
             crate::entities::instagram_video::ActiveModel {
                 id: Set(self.video_id),
-                transcript: Set(Some(serde_json::to_value(transcript).unwrap())),
+                transcript: Set(Some(transcript)),
                 ..Default::default()
             },
         )
