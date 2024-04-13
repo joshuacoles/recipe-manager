@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use crate::jobs::llm_extract_details::LlmMethod;
 
 #[derive(Debug, clap::Parser)]
 pub struct Cli {
@@ -34,31 +35,6 @@ pub struct Cli {
     )]
     pub reel_dir: PathBuf,
 
-    /// OpenAI API key
-    #[clap(
-        long = "openai-api-key",
-        env = "RECIPE_OPENAI_API_KEY",
-        default_value = "ollama"
-    )]
-    pub openai_api_key: String,
-
-    /// Direct OpenAI API key
-    #[clap(long = "direct-openai-api-key", env = "RECIPE_DIRECT_OPENAI_API_KEY")]
-    pub direct_openai_api_key: String,
-
-    /// OpenAI API model
-    #[clap(long = "model", env = "RECIPE_OPENAI_MODEL", default_value = "llama2")]
-    pub openai_model: String,
-
-    /// OpenAI Base url
-    #[clap(
-        long = "openai-base-url",
-        env = "RECIPE_OPENAI_BASE_URL",
-        default_value = "http://localhost:11434/v1"
-    )]
-    pub openai_base_url: String,
-
-
     #[clap(
         long = "whisper-url",
         env = "RECIPE_WHISPER_URL",
@@ -72,6 +48,34 @@ pub struct Cli {
         default_value = "local"
     )]
     pub whisper_key: String,
+
+    #[clap(
+        long = "completion-url",
+        env = "RECIPE_COMPLETION_URL",
+        default_value = "http://localhost:11434/api/generate"
+    )]
+    pub completion_url: String,
+
+    #[clap(
+        long = "completion-key",
+        env = "RECIPE_COMPLETION_KEY",
+        default_value = "ollama"
+    )]
+    pub completion_key: String,
+
+    #[clap(
+        long = "model",
+        env = "RECIPE_COMPLETION_MODEL",
+        default_value = "gemma"
+    )]
+    pub completion_model: String,
+
+    #[clap(
+        long = "completion-mode",
+        env = "RECIPE_COMPLETION_MODE",
+        default_value = "ollama-json"
+    )]
+    pub completion_mode: LlmMethod,
 }
 
 impl Cli {
@@ -83,17 +87,5 @@ impl Cli {
         }
 
         Ok(())
-    }
-
-    pub fn openai_client(
-        &self,
-    ) -> anyhow::Result<async_openai::Client<async_openai::config::OpenAIConfig>> {
-        let config = async_openai::config::OpenAIConfig::new()
-            .with_api_base(&self.openai_base_url)
-            .with_api_key(&self.openai_api_key);
-
-        let client = async_openai::Client::with_config(config);
-
-        Ok(client)
     }
 }

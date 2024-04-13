@@ -4,11 +4,18 @@ This the instagram reel description of a recipe. Please extract the title of the
 
 There may be multiple recipes included in the description. If so please make sure to separate these out clearly with different titles and other information. Please provide this information as an array of JSON objects, one per recipe in the description. Do not miss any commas in objects or arrays or open or close brackets or braces, **this is essential**.This array should be root object of the JSON you return, do not wrap this array in any form of container, and do not fail to include it if there is only one recipe included. Each object you output in this array will have three properties: "ingredients", "instructions", and "title".
 
- - The "title" key should be a string which is the title of the recipe.
+- The "title" key should be a string which is the title of the recipe.
 - The "ingredients" key should contain arrays of strings, where each item in the list is an ingredient.
 - The "instructions" key should contain arrays of strings, where each item in the list is a step in the instructions for making the recipe. Make sure to break the instructions up into multiple steps, do not just return one long instruction as this will be hard to follow and not inline with your purpose.
 
-Do not wrap the JSON output in a code-block, or include any text before or after the JSON.
+When you respond you **must** provide only a JSON object in the format described. Do not do any of the following,
+
+- Do not wrap the JSON object in a code-block.
+- Do not include any text before the JSON object.
+- Do not include any text after the JSON.
+- Do not explain your output.
+- Do not provide any notes for your output outside the JSON object.
+- Do not provide context for your output outside the JSON object.
 
 Here is the description:
 

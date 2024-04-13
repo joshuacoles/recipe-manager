@@ -1,10 +1,10 @@
-use async_openai::config::OpenAIConfig;
-use async_openai::Client;
 use once_cell::sync::OnceCell;
 use sea_orm::DatabaseConnection;
 use sqlx::PgPool;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use crate::cli::Cli;
+use crate::jobs::llm_extract_details::LlmMethod;
 
 pub mod extract_transcript;
 pub mod fetch_reel;
@@ -16,34 +16,39 @@ pub struct JobContext {
     pub raw_db: PgPool,
     pub yt_dlp_command_string: OsString,
     pub reel_dir: PathBuf,
-    pub openai_client: Client<OpenAIConfig>,
-    pub model: String,
 
     pub whisper_url: String,
     pub whisper_key: String,
+
+    pub completion_url: String,
+    pub completion_key: String,
+    pub completion_model: String,
+    pub completion_mode: LlmMethod
 }
 
 impl JobContext {
     pub fn new(
-        p0: DatabaseConnection,
+        db: DatabaseConnection,
         raw_db: PgPool,
-        p1: &Option<PathBuf>,
-        p2: PathBuf,
-        p3: Client<OpenAIConfig>,
-        p4: String,
-        p5: String,
-        model: String,
+        cli: &Cli,
     ) -> JobContext {
         JobContext {
-            db: p0,
+            db,
             raw_db,
-            yt_dlp_command_string: p1.as_ref().map_or_else(|| "yt-dlp".into(), |p| p.into()),
-            reel_dir: p2,
-            openai_client: p3,
 
-            whisper_url: p4,
-            whisper_key: p5,
-            model,
+            yt_dlp_command_string: cli.yt_dlp_path
+                .as_ref()
+                .map_or_else(|| "yt-dlp".into(), |p| p.into()),
+
+            reel_dir: cli.reel_dir.clone(),
+
+            whisper_url: cli.whisper_url.clone(),
+            whisper_key: cli.whisper_key.clone(),
+
+            completion_url: cli.completion_url.clone(),
+            completion_key: cli.completion_key.clone(),
+            completion_model: cli.completion_model.clone(),
+            completion_mode: cli.completion_mode,
         }
     }
 

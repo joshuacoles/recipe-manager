@@ -36,7 +36,8 @@ sea-orm = { version = "0.12", features = [
     "runtime-tokio-rustls",
     "with-json",
     "with-chrono",
-    "macros"
+    "macros",
+    "with-uuid"
 ] }
 tower-livereload = "0.9.2"
 notify = "5.2.0"

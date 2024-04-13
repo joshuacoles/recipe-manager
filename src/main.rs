@@ -46,7 +46,6 @@ async fn main() -> anyhow::Result<()> {
     cli.validate_reel_dir()?;
 
     let db = PgPool::connect(&cli.database_url).await?;
-
     let seaorm = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(db.clone());
 
     sqlx::migrate!().run(&db).await?;
@@ -61,12 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let job_context = JobContext::new(
         seaorm.clone(),
         db.clone(),
-        &cli.yt_dlp_path,
-        cli.reel_dir.clone(),
-        cli.openai_client()?,
-        cli.whisper_url.clone(),
-        cli.whisper_key.clone(),
-        cli.openai_model,
+        &cli,
     );
 
     JOB_CONTEXT.set(job_context.clone()).unwrap();
@@ -92,7 +86,8 @@ async fn main() -> anyhow::Result<()> {
         // `GET /recipes/:id`
         .show(show_recipe);
 
-    let videos = Resource::named("videos").show(get_video);
+    let videos = Resource::named("videos")
+        .show(get_video);
 
     let livereload = LiveReloadLayer::new();
     let reloader = livereload.reloader();
@@ -165,8 +160,8 @@ async fn llm(
         video_id: id as i32,
     };
 
-    jobs.insert_task(&job).await?;
-    Ok(StatusCode::CREATED.into_response())
+    let job = jobs.insert_task(&job).await?;
+    Ok((StatusCode::CREATED, job.id.to_string()).into_response())
 }
 
 #[derive(Serialize, FromQueryResult)]
@@ -231,8 +226,6 @@ async fn show_recipe(
     let Ok(recipe) = load_nested_recipe(recipe_id as i32, &db).await else {
         return (StatusCode::NOT_FOUND, "Recipe not found").into_response();
     };
-
-    tracing::info!("Displaying Recipe: {:#?}", recipe);
 
     match header_map.get(ACCEPT) {
         Some(hv) if is_json(hv) => Json(recipe).into_response(),

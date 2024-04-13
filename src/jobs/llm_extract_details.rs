@@ -1,21 +1,21 @@
+use std::fmt::Debug;
 use crate::entities::instagram_video::Model;
 use crate::entities::{instagram_video, recipes};
 use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::anyhow;
-use async_openai::config::OpenAIConfig;
-use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestUserMessage,
-    ChatCompletionRequestUserMessageContent, CreateChatCompletionRequest,
-};
-use async_openai::Client;
+use async_openai::types::CreateChatCompletionResponse;
+use chrono::{DateTime, Utc};
+use clap::ValueEnum;
 use fang::async_trait;
 use fang::asynk::async_queue::AsyncQueueable;
 use fang::serde::{Deserialize, Serialize};
 use fang::{AsyncRunnable, FangError};
+use reqwest::Response;
 use sea_orm::ColumnTrait;
 use sea_orm::QueryFilter;
 use sea_orm::{DatabaseConnection, EntityTrait, Set};
-use crate::jobs::extract_transcript::Transcript;
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
@@ -37,10 +37,20 @@ enum AcceptableResponses {
     Object { recipes: Vec<ExtractedRecipe> },
 }
 
-enum LlmMethod {
-    PromptBased,
-    OllamaJsonMode,
-    FunctionCalling,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, ValueEnum)]
+pub enum LlmMethod {
+    GenericOpenAI,
+    OllamaJson,
+    OpenAITools,
+    AnthropicTools,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OllamaGenerateResponse {
+    response: String,
+
+    #[serde(flatten)]
+    rest: Value,
 }
 
 impl AcceptableResponses {
@@ -75,13 +85,44 @@ impl LLmExtractDetailsJob {
         Ok(())
     }
 
+    async fn handle_response<T: DeserializeOwned + Debug>(response: Response) -> anyhow::Result<T> {
+        if !response.status().is_success() {
+            tracing::error!("Failed to send request, response metadata: {:#?}", response);
+            let response_status_code = response.status().as_u16();
+            let response_body = response.text().await?;
+            tracing::error!("Failed to send request, response content: {:#?}", response_body);
+            return Err(anyhow!("Failed to send request: {}", response_status_code));
+        }
+
+        let response = response.text().await?;
+        tracing::info!("Response raw received: {}", response);
+
+        let response = serde_json::from_str::<T>(&response)?;
+        tracing::info!("Response received: {:#?}", response);
+
+        Ok(response)
+    }
+
+    fn fetch_prompt(&self, llm_method: LlmMethod) -> String {
+        let dynamic = true;
+
+        let prompt_template = if dynamic {
+            std::fs::read_to_string("app/prompts/extract_recipe_details.txt").unwrap()
+        } else {
+            include_str!("../../app/prompts/extract_recipe_details.txt").to_string()
+        };
+
+        prompt_template
+    }
+
     async fn extract_recipes(
         &self,
         context: &JobContext,
         instagram_video: &Model,
     ) -> anyhow::Result<Vec<ExtractedRecipe>> {
-        let client = &context.openai_client;
-        let llm_model = &context.model;
+        let completion_url = &context.completion_url;
+        let api_key = &context.completion_key;
+        let llm_model = &context.completion_model;
 
         let transcript = match &instagram_video.transcript {
             Some(transcript) => &transcript.text,
@@ -93,14 +134,83 @@ impl LLmExtractDetailsJob {
             .description
             .as_str();
 
-        let dynamic = true;
+        let prompt_template = self.fetch_prompt(context.completion_mode);
+        let prompt = Self::assemble_prompt(&prompt_template, description, transcript);
+        tracing::info!("Prompt prepared");
 
-        let prompt_template = if dynamic {
-            std::fs::read_to_string("app/prompts/extract_recipe_details.txt").unwrap()
-        } else {
-            include_str!("../../app/prompts/extract_recipe_details.txt").to_string()
-        };
+        match context.completion_mode {
+            LlmMethod::GenericOpenAI => {
+                let mut request = json!({
+                    "model": llm_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ]
+                });
 
+                tracing::info!("Request prepared: {:#?}", request);
+
+                let response = reqwest::Client::new()
+                    .post(completion_url)
+                    .bearer_auth(api_key)
+                    .json(&request)
+                    .send()
+                    .await?;
+
+                let response: CreateChatCompletionResponse = Self::handle_response(response).await?;
+
+                let response = response.choices[0]
+                    .message
+                    .content
+                    .clone()
+                    .ok_or(anyhow!("No content in response"))?;
+
+                // If we are not in Llama json mode, we may need to strip a code block
+                let message = response.replace("```json\n", "")
+                    .replace("```", "");
+
+                return Ok(serde_json::from_str::<AcceptableResponses>(&message)?.retrieve());
+            }
+
+            LlmMethod::OllamaJson => {
+                let mut request = json!({
+                    "model": llm_model,
+                    "prompt": prompt,
+                    "format": "json",
+                    "stream": false,
+                });
+
+                tracing::info!("Request prepared: {:#?}", request);
+
+                let response = reqwest::Client::new()
+                    .post(completion_url)
+                    .bearer_auth(api_key)
+                    .json(&request)
+                    .send()
+                    .await?;
+
+                let response: OllamaGenerateResponse = Self::handle_response(response).await?;
+
+                // If we are not in Llama json mode, we may need to strip a code block
+                let message = response.response.replace("```json\n", "")
+                    .replace("```", "");
+
+                return Ok(serde_json::from_str::<AcceptableResponses>(&message)?.retrieve());
+            }
+
+            LlmMethod::OpenAITools => {
+                unimplemented!()
+            }
+
+            LlmMethod::AnthropicTools => {
+                unimplemented!()
+            }
+        }
+    }
+
+    fn assemble_prompt(prompt_template: &String, description: &str, transcript: &str) -> String {
         let env = {
             let mut env = minijinja::Environment::new();
             env.add_template("prompt", &prompt_template).unwrap();
@@ -113,44 +223,7 @@ impl LLmExtractDetailsJob {
             "description": description,
             "transcript": transcript,
         })).unwrap();
-
-        tracing::info!("Prompt prepared");
-
-        let completion = CreateChatCompletionRequest {
-            model: llm_model.clone(),
-            messages: vec![ChatCompletionRequestMessage::User(
-                ChatCompletionRequestUserMessage {
-                    content: ChatCompletionRequestUserMessageContent::Text(prompt),
-                    ..Default::default()
-                },
-            )],
-
-            ..Default::default()
-        };
-
-        let recipes_in_description = Self::parse_response(client, completion).await?;
-        Ok(recipes_in_description)
-    }
-
-    async fn parse_response(
-        client: &Client<OpenAIConfig>,
-        response: CreateChatCompletionRequest,
-    ) -> anyhow::Result<Vec<ExtractedRecipe>> {
-        let completion = client.chat().create(response).await?;
-        tracing::info!("Response received: {:#?}", completion);
-
-        let response = &completion.choices[0];
-        let message = response
-            .message
-            .content
-            .clone()
-            .ok_or(anyhow!("No content in response"))?;
-        let message = message.replace("```json\n", "").replace("```", "");
-
-        let recipes_in_description =
-            serde_json::from_str::<AcceptableResponses>(&message)?.retrieve();
-
-        Ok(recipes_in_description)
+        prompt
     }
 
     async fn save_newly_recipes(
