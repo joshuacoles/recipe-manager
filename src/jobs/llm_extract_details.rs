@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use crate::entities::instagram_video::Model;
 use crate::entities::{instagram_video, recipes};
 use crate::jobs::{JobContext, JOB_CONTEXT};
@@ -16,6 +15,7 @@ use sea_orm::QueryFilter;
 use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use std::fmt::Debug;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(crate = "fang::serde")]
@@ -90,7 +90,10 @@ impl LLmExtractDetailsJob {
             tracing::error!("Failed to send request, response metadata: {:#?}", response);
             let response_status_code = response.status().as_u16();
             let response_body = response.text().await?;
-            tracing::error!("Failed to send request, response content: {:#?}", response_body);
+            tracing::error!(
+                "Failed to send request, response content: {:#?}",
+                response_body
+            );
             return Err(anyhow!("Failed to send request: {}", response_status_code));
         }
 
@@ -129,10 +132,7 @@ impl LLmExtractDetailsJob {
             None => "",
         };
 
-        let description = instagram_video
-            .info
-            .description
-            .as_str();
+        let description = instagram_video.info.description.as_str();
 
         let prompt_template = self.fetch_prompt(context.completion_mode);
         let prompt = Self::assemble_prompt(&prompt_template, description, transcript);
@@ -159,7 +159,8 @@ impl LLmExtractDetailsJob {
                     .send()
                     .await?;
 
-                let response: CreateChatCompletionResponse = Self::handle_response(response).await?;
+                let response: CreateChatCompletionResponse =
+                    Self::handle_response(response).await?;
 
                 let response = response.choices[0]
                     .message
@@ -168,8 +169,7 @@ impl LLmExtractDetailsJob {
                     .ok_or(anyhow!("No content in response"))?;
 
                 // If we are not in Llama json mode, we may need to strip a code block
-                let message = response.replace("```json\n", "")
-                    .replace("```", "");
+                let message = response.replace("```json\n", "").replace("```", "");
 
                 return Ok(serde_json::from_str::<AcceptableResponses>(&message)?.retrieve());
             }
@@ -194,7 +194,9 @@ impl LLmExtractDetailsJob {
                 let response: OllamaGenerateResponse = Self::handle_response(response).await?;
 
                 // If we are not in Llama json mode, we may need to strip a code block
-                let message = response.response.replace("```json\n", "")
+                let message = response
+                    .response
+                    .replace("```json\n", "")
                     .replace("```", "");
 
                 return Ok(serde_json::from_str::<AcceptableResponses>(&message)?.retrieve());
@@ -219,10 +221,12 @@ impl LLmExtractDetailsJob {
 
         let template = env.get_template("prompt").unwrap();
 
-        let prompt = template.render(serde_json::json!({
-            "description": description,
-            "transcript": transcript,
-        })).unwrap();
+        let prompt = template
+            .render(json!({
+                "description": description,
+                "transcript": transcript,
+            }))
+            .unwrap();
         prompt
     }
 
@@ -243,8 +247,8 @@ impl LLmExtractDetailsJob {
                 ..Default::default()
             }
         }))
-            .exec(db)
-            .await?;
+        .exec(db)
+        .await?;
 
         Ok(())
     }

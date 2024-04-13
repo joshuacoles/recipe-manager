@@ -1,6 +1,6 @@
+use crate::jobs::llm_extract_details::LlmMethod;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use crate::jobs::llm_extract_details::LlmMethod;
 
 #[derive(Debug, clap::Parser)]
 pub struct Cli {

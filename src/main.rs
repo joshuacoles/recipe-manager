@@ -1,7 +1,7 @@
 mod cli;
 mod entities;
-mod jobs;
 mod error;
+mod jobs;
 
 use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::anyhow;
@@ -12,7 +12,10 @@ use axum::extract::{FromRequest, Path, Request};
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::{routing::{get, post}, Extension, Form, Json, Router};
+use axum::{
+    routing::{get, post},
+    Extension, Form, Json, Router,
+};
 use axum_extra::routing::Resource;
 use clap::Parser;
 use cli::Cli;
@@ -23,6 +26,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
 use axum_template::{engine::Engine, RenderHtml};
 use jobs::extract_transcript::ExtractTranscriptJob;
 use minijinja::{path_loader, Environment};
@@ -35,7 +39,6 @@ use sea_orm::{
 use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use tower_livereload::LiveReloadLayer;
-use crate::jobs::llm_extract_details::LLmExtractDetailsJob;
 
 type FangQueue = AsyncQueue<NoTls>;
 
@@ -57,11 +60,7 @@ async fn main() -> anyhow::Result<()> {
 
     queue.connect(NoTls).await?;
 
-    let job_context = JobContext::new(
-        seaorm.clone(),
-        db.clone(),
-        &cli,
-    );
+    let job_context = JobContext::new(seaorm.clone(), db.clone(), &cli);
 
     JOB_CONTEXT.set(job_context.clone()).unwrap();
 
@@ -86,8 +85,7 @@ async fn main() -> anyhow::Result<()> {
         // `GET /recipes/:id`
         .show(show_recipe);
 
-    let videos = Resource::named("videos")
-        .show(get_video);
+    let videos = Resource::named("videos").show(get_video);
 
     let livereload = LiveReloadLayer::new();
     let reloader = livereload.reloader();
@@ -95,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(recipes)
         .merge(videos)
-        .route("/", get(|| async { Redirect::to("/recipes") } ))
+        .route("/", get(|| async { Redirect::to("/recipes") }))
         .route("/videos/:id/llm", post(llm))
         .route("/videos/:id/transcribe", post(transcribe_video))
         .nest_service("/public", ServeDir::new("./public"))
@@ -138,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn transcribe_video(
-    Path((id, )): Path<(u32, )>,
+    Path((id,)): Path<(u32,)>,
     Extension(mut jobs): Extension<FangQueue>,
     Extension(db): Extension<DatabaseConnection>,
 ) -> error::Result<impl IntoResponse> {
@@ -153,7 +151,7 @@ async fn transcribe_video(
 }
 
 async fn llm(
-    Path((id, )): Path<(u32, )>,
+    Path((id,)): Path<(u32,)>,
     Extension(mut jobs): Extension<FangQueue>,
 ) -> error::Result<impl IntoResponse> {
     let job = LLmExtractDetailsJob {
@@ -193,7 +191,12 @@ async fn recipes_index(
                 .all(&db)
                 .await?;
 
-            Ok(RenderHtml("recipes/index.html", template_engine, json!({ "recipes": recipes })).into_response())
+            Ok(RenderHtml(
+                "recipes/index.html",
+                template_engine,
+                json!({ "recipes": recipes }),
+            )
+            .into_response())
         }
     }
 }
@@ -221,7 +224,7 @@ async fn show_recipe(
     header_map: HeaderMap,
     Extension(template_engine): Extension<Engine<AutoReloader>>,
     Extension(db): Extension<DatabaseConnection>,
-    Path((recipe_id, )): Path<(u32, )>,
+    Path((recipe_id,)): Path<(u32,)>,
 ) -> impl IntoResponse {
     let Ok(recipe) = load_nested_recipe(recipe_id as i32, &db).await else {
         return (StatusCode::NOT_FOUND, "Recipe not found").into_response();
@@ -234,14 +237,15 @@ async fn show_recipe(
 }
 
 fn is_json(hv: &HeaderValue) -> bool {
-    hv
-        .to_str()
+    hv.to_str()
         .map(|hv| hv == "application/json")
         .unwrap_or(false)
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c().await.expect("Failed to install CTRL+C handler");
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to install CTRL+C handler");
 }
 
 #[derive(Deserialize, Debug)]
@@ -265,9 +269,9 @@ impl<T> FormOrJson<T> {
 
 #[async_trait]
 impl<T, S> FromRequest<S> for FormOrJson<T>
-    where
-        T: DeserializeOwned,
-        S: Send + Sync,
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
 {
     type Rejection = Response;
 
@@ -305,14 +309,14 @@ async fn create_recipe_from_reel(
 async fn get_video(
     Extension(context): Extension<JobContext>,
     headers: HeaderMap,
-    Path((instagram_id, )): Path<(String, )>,
+    Path((instagram_id,)): Path<(String,)>,
 ) -> error::Result<impl IntoResponse> {
     let video_path = context.video_path(&instagram_id);
 
     let mut req = Request::new(Body::empty());
     *req.headers_mut() = headers;
-    Ok(ServeFile::new(video_path).try_call(req)
+    Ok(ServeFile::new(video_path)
+        .try_call(req)
         .await
-        .map_err(|e| anyhow!(e))?
-    )
+        .map_err(|e| anyhow!(e))?)
 }

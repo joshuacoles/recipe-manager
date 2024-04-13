@@ -1,10 +1,10 @@
+use crate::cli::Cli;
+use crate::jobs::llm_extract_details::LlmMethod;
 use once_cell::sync::OnceCell;
 use sea_orm::DatabaseConnection;
 use sqlx::PgPool;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use crate::cli::Cli;
-use crate::jobs::llm_extract_details::LlmMethod;
 
 pub mod extract_transcript;
 pub mod fetch_reel;
@@ -23,20 +23,17 @@ pub struct JobContext {
     pub completion_url: String,
     pub completion_key: String,
     pub completion_model: String,
-    pub completion_mode: LlmMethod
+    pub completion_mode: LlmMethod,
 }
 
 impl JobContext {
-    pub fn new(
-        db: DatabaseConnection,
-        raw_db: PgPool,
-        cli: &Cli,
-    ) -> JobContext {
+    pub fn new(db: DatabaseConnection, raw_db: PgPool, cli: &Cli) -> JobContext {
         JobContext {
             db,
             raw_db,
 
-            yt_dlp_command_string: cli.yt_dlp_path
+            yt_dlp_command_string: cli
+                .yt_dlp_path
                 .as_ref()
                 .map_or_else(|| "yt-dlp".into(), |p| p.into()),
 

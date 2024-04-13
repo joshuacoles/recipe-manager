@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::entities::instagram_video;
 use crate::entities::instagram_video::Model;
 use crate::jobs::extract_transcript::ExtractTranscript;
@@ -10,9 +9,10 @@ use fang::serde::{Deserialize, Serialize};
 use fang::{AsyncRunnable, FangError};
 use lazy_static::lazy_static;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, FromJsonQueryResult};
 use sea_orm::{ActiveModelTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, FromJsonQueryResult};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::path::PathBuf;
@@ -37,7 +37,7 @@ pub struct ReelInfo {
     pub description: String,
 
     #[serde(flatten)]
-    rest: HashMap<String, Value>
+    rest: HashMap<String, Value>,
 }
 
 impl FetchReelJob {

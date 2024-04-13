@@ -1,15 +1,18 @@
-use std::collections::HashMap;
 use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::bail;
 use async_trait::async_trait;
 use fang::{AsyncQueueable, AsyncRunnable, Deserialize, FangError, Serialize};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, FromJsonQueryResult, QueryFilter, QuerySelect, Set};
-use std::path::{Path, PathBuf};
 use ordered_float::OrderedFloat;
-use serde_json::Value;
-use tokio::process::Command;
 use reqwest::{multipart, Body, Client};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, EntityTrait, FromJsonQueryResult, QueryFilter, QuerySelect,
+    Set,
+};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use tokio::fs::File;
+use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
@@ -57,7 +60,7 @@ impl ExtractTranscript {
                     .text("model", "whisper-1")
                     .text("response_format", "verbose_json")
                     .text("language", "en")
-                    .part("file", audio)
+                    .part("file", audio),
             )
             .send()
             .await?
@@ -103,11 +106,11 @@ pub struct ExtractTranscriptJob {
 
 impl ExtractTranscriptJob {
     pub async fn new(video_id: i32, db: &DatabaseConnection) -> anyhow::Result<Self> {
-        let (reel_id, ) = crate::entities::instagram_video::Entity::find()
+        let (reel_id,) = crate::entities::instagram_video::Entity::find()
             .select_only()
             .columns([crate::entities::instagram_video::Column::InstagramId])
             .filter(crate::entities::instagram_video::Column::Id.eq(video_id))
-            .into_tuple::<(String, )>()
+            .into_tuple::<(String,)>()
             .one(db)
             .await?
             .ok_or(anyhow::anyhow!("Video not found"))?;
@@ -126,8 +129,8 @@ impl ExtractTranscriptJob {
                 ..Default::default()
             },
         )
-            .exec(&context.db)
-            .await?;
+        .exec(&context.db)
+        .await?;
 
         Ok(())
     }
