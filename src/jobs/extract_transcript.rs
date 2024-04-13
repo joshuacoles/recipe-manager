@@ -22,7 +22,7 @@ pub struct Transcript {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
-struct Segment {
+pub struct Segment {
     id: i32,
     start: OrderedFloat<f64>,
     end: OrderedFloat<f64>,
@@ -50,7 +50,7 @@ impl ExtractTranscript {
             .mime_str("audio/wav")?;
 
         let output = Client::new()
-            .post(&format!("{}", context.whisper_url))
+            .post(&context.whisper_url)
             .bearer_auth(&context.whisper_key)
             .multipart(
                 multipart::Form::new()
