@@ -8,11 +8,13 @@
 </head>
 
 <body class="bg-gray-100">
+<!-- THIS IS A HACK -->
+<div class="p-2">
+    <a href="/" class="text-blue-500 hover:underline">Back to Recipe List</a>
+</div>
 <div class="container mx-auto px-4 py-8">
-    <h1 class="text-4xl font-bold mb-4 text-center">Recipe Viewer</h1>
+    <h1 class="text-4xl font-bold mb-4 text-center">{{title}}</h1>
     <div class="bg-white shadow-md rounded-lg p-6">
-        <h2 class="text-2xl font-bold mb-4" id="recipe-title">{{title}}</h2>
-
         <div class="grid sm:grid-cols-2 gap-6">
             <div>
                 <div>
@@ -34,7 +36,8 @@
                     </div>
                 </div>
                 <div class="flex justify-between mb-6">
-                    <a href="{{ instagram_video.video_url }}" class="text-blue-500 hover:underline" id="recipe-url" target="_blank">View on
+                    <a href="{{ instagram_video.video_url }}" class="text-blue-500 hover:underline" id="recipe-url"
+                       target="_blank">View on
                         Instagram</a>
                 </div>
 
@@ -44,16 +47,16 @@
                 </details>
 
                 {% if instagram_video.transcript %}
-                    <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
-                        <summary class="text-blue-500 cursor-pointer">Transcript</summary>
-                        <ul class="flex flex-col gap-2 p-4 text-lg">
-                            {% for segment in instagram_video.transcript.segments %}
-                                <li class="mb-2">
-                                    {{ segment.text }}
-                                </li>
-                            {% endfor %}
-                        </ul>
-                    </details>
+                <details class="flex justify-between w-full bg-gray-200 p-2 rounded-md">
+                    <summary class="text-blue-500 cursor-pointer">Transcript</summary>
+                    <ul class="flex flex-col gap-2 p-4 text-lg">
+                        {% for segment in instagram_video.transcript.segments %}
+                        <li class="mb-2">
+                            {{ segment.text }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </details>
                 {% endif %}
             </div>
             <div>

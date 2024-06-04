@@ -30,6 +30,7 @@ lazy_static! {
 pub(crate) struct FetchReelJob {
     pub(crate) reel_url: String,
     pub(crate) reel_id: String,
+    pub(crate) auto_llm: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
@@ -41,7 +42,7 @@ pub struct ReelInfo {
 }
 
 impl FetchReelJob {
-    pub fn new(reel_url: String) -> anyhow::Result<Self> {
+    pub fn new(reel_url: String, auto_llm: bool) -> anyhow::Result<Self> {
         let captures = REEL_REGEX
             .captures(&reel_url)
             .ok_or(anyhow!("Invalid URL"))?;
@@ -52,7 +53,7 @@ impl FetchReelJob {
             .as_str()
             .to_string();
 
-        Ok(Self { reel_url, reel_id })
+        Ok(Self { reel_url, reel_id, auto_llm })
     }
 
     pub async fn exec(&self, context: &JobContext) -> anyhow::Result<Option<Model>> {
@@ -62,7 +63,7 @@ impl FetchReelJob {
             .filter(instagram_video::Column::InstagramId.eq(&self.reel_id))
             .select_only()
             .column(instagram_video::Column::Id)
-            .into_tuple::<(i32,)>()
+            .into_tuple::<(i32, )>()
             .one(&context.db)
             .await?;
 
@@ -85,8 +86,8 @@ impl FetchReelJob {
 
             ..Default::default()
         }
-        .insert(&context.db)
-        .await?;
+            .insert(&context.db)
+            .await?;
 
         tracing::info!("Added as video id: {}", video.id);
 
@@ -143,12 +144,21 @@ impl AsyncRunnable for FetchReelJob {
             description: "Failed to read context".to_string(),
         })?;
 
-        self.exec(context).await.map_err(|e| {
+        let video = self.exec(context).await.map_err(|e| {
             tracing::error!("{e:?}");
             FangError {
                 description: e.to_string(),
             }
         })?;
+
+        if let Some(video) = video {
+            if self.auto_llm {
+                let job = crate::jobs::llm_extract_details::LLmExtractDetailsJob {
+                    video_id: video.id,
+                };
+                _queue.insert_task(&job).await?;
+            }
+        }
 
         Ok(())
     }

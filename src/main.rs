@@ -251,6 +251,7 @@ async fn shutdown_signal() {
 #[derive(Deserialize, Debug)]
 struct CreateRecipeFromReelRequest {
     reel_url: String,
+    auto_llm: Option<bool>,
 }
 
 enum FormOrJson<T> {
@@ -296,7 +297,7 @@ async fn create_recipe_from_reel(
 ) -> error::Result<impl IntoResponse> {
     let request = request.into_inner();
 
-    return match FetchReelJob::new(request.reel_url) {
+    return match FetchReelJob::new(request.reel_url, request.auto_llm.unwrap_or(false)) {
         Ok(job) => {
             queue.insert_task(&job).await?;
             Ok(StatusCode::CREATED.into_response())
