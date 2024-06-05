@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use tokio::fs::File;
 use tokio::process::Command;
 use tokio_util::codec::{BytesCodec, FramedRead};
+use tracing::error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromJsonQueryResult, Eq, PartialEq)]
 pub struct Transcript {
@@ -64,10 +65,19 @@ impl ExtractTranscript {
             )
             .send()
             .await?
-            .json()
+            .text()
             .await?;
 
-        Ok(output)
+        let output = serde_json::from_str::<_>(&output);
+
+        match output {
+            Ok(output) => Ok(output),
+            Err(err) => {
+                error!("Failed to extract transcript with error {:?}", err);
+                error!("Returned output: {:?}", output);
+                bail!("Failed to extract transcript: {:?}", err)
+            }
+        }
     }
 
     async fn extract_audio(video_path: &Path) -> anyhow::Result<PathBuf> {
@@ -106,11 +116,11 @@ pub struct ExtractTranscriptJob {
 
 impl ExtractTranscriptJob {
     pub async fn new(video_id: i32, db: &DatabaseConnection) -> anyhow::Result<Self> {
-        let (reel_id,) = crate::entities::instagram_video::Entity::find()
+        let (reel_id, ) = crate::entities::instagram_video::Entity::find()
             .select_only()
             .columns([crate::entities::instagram_video::Column::InstagramId])
             .filter(crate::entities::instagram_video::Column::Id.eq(video_id))
-            .into_tuple::<(String,)>()
+            .into_tuple::<(String, )>()
             .one(db)
             .await?
             .ok_or(anyhow::anyhow!("Video not found"))?;
@@ -129,8 +139,8 @@ impl ExtractTranscriptJob {
                 ..Default::default()
             },
         )
-        .exec(&context.db)
-        .await?;
+            .exec(&context.db)
+            .await?;
 
         Ok(())
     }
