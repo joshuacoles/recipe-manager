@@ -53,7 +53,7 @@ impl ExtractTranscript {
             .file_name("audio.wav")
             .mime_str("audio/wav")?;
 
-        let output = Client::new()
+        let raw_output = Client::new()
             .post(&context.whisper_url)
             .bearer_auth(&context.whisper_key)
             .multipart(
@@ -68,14 +68,23 @@ impl ExtractTranscript {
             .text()
             .await?;
 
-        let output = serde_json::from_str::<_>(&output);
+        let output = serde_json::from_str::<_>(&raw_output);
 
         match output {
             Ok(output) => Ok(output),
-            Err(err) => {
-                error!("Failed to extract transcript with error {:?}", err);
-                error!("Returned output: {:?}", output);
-                bail!("Failed to extract transcript: {:?}", err)
+            Err(ref err) => {
+                let unstructured_json = serde_json::from_str::<Value>(&raw_output)
+
+                if let Err(json_err) = unstructured_json {
+                    error!("Invalid JSON returned {:?}", json_err);
+                    error!("Returned output: {:?}", raw_output);
+                    bail!("Failed to parse JSON: {:?}", json_err)
+                } else {
+                    let unstructured_json = unstructured_json.unwrap();
+                    error!("Failed to extract transcript with error {:?}", err);
+                    error!("Returned output: {:?}", unstructured_json);
+                    bail!("Failed to extract transcript: {:?}", err)
+                }
             }
         }
     }
