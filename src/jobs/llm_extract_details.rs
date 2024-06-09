@@ -3,7 +3,6 @@ use crate::entities::{instagram_video, recipes};
 use crate::jobs::{JobContext, JOB_CONTEXT};
 use anyhow::anyhow;
 use async_openai::types::CreateChatCompletionResponse;
-use chrono::{DateTime, Utc};
 use clap::ValueEnum;
 use fang::async_trait;
 use fang::asynk::async_queue::AsyncQueueable;
@@ -140,7 +139,7 @@ impl LLmExtractDetailsJob {
 
         match context.completion_mode {
             LlmMethod::GenericOpenAI => {
-                let mut request = json!({
+                let request = json!({
                     "model": llm_model,
                     "messages": [
                         {
@@ -175,7 +174,7 @@ impl LLmExtractDetailsJob {
             }
 
             LlmMethod::OllamaJson => {
-                let mut request = json!({
+                let request = json!({
                     "model": llm_model,
                     "prompt": prompt,
                     "format": "json",

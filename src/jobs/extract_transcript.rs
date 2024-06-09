@@ -73,7 +73,7 @@ impl ExtractTranscript {
         match output {
             Ok(output) => Ok(output),
             Err(ref err) => {
-                let unstructured_json = serde_json::from_str::<Value>(&raw_output)
+                let unstructured_json = serde_json::from_str::<Value>(&raw_output);
 
                 if let Err(json_err) = unstructured_json {
                     error!("Invalid JSON returned {:?}", json_err);
