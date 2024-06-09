@@ -30,7 +30,6 @@ jobs:
         with:
           context: .
           push: true
-          file: ./Dockerfile.cache
           tags: git.joshuacoles.me/${{ github.repository }}:latest,git.joshuacoles.me/${{ github.repository }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
